@@ -28,10 +28,19 @@ post_json() {
   fi
 }
 
-# Create a minimal submodel (AAS v3.0 JSON serialization format)
+# Create a submodel with at least one element (required by aas-test-engines
+# which needs an idShortPath for element-level endpoint tests)
 post_json "$API_BASE/submodels" '{
   "id": "urn:example:submodel:test-1",
-  "idShort": "TestSubmodel"
+  "idShort": "TestSubmodel",
+  "submodelElements": [
+    {
+      "idShort": "TestProperty",
+      "modelType": "Property",
+      "valueType": "xs:string",
+      "value": "hello"
+    }
+  ]
 }' "submodel urn:example:submodel:test-1"
 
 # Create a minimal AAS shell
