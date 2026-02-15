@@ -1,0 +1,172 @@
+name: Nightly Benchmark
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      sdk_filter:
+        description: "Run only this SDK id (leave empty for all)"
+        required: false
+        default: ""
+
+permissions:
+  pages: write
+  id-token: write
+
+concurrency:
+  group: benchmark
+  cancel-in-progress: false
+
+jobs:
+  # ── Job 1: Build the matrix from known-sdks.json ──────────────
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate matrix
+        id: set
+        env:
+          SDK_FILTER: ${{ github.event.inputs.sdk_filter }}
+        run: |
+          MATRIX=$(bash scripts/set-matrix.sh)
+          if [ -n "$SDK_FILTER" ]; then
+            MATRIX=$(echo "$MATRIX" | jq -c --arg id "$SDK_FILTER" \
+              '{include: [.include[] | select(.id == $id)]}')
+          fi
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  # ── Job 2: Benchmark each SDK ─────────────────────────────────
+  benchmark:
+    needs: matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJSON(needs.matrix.outputs.matrix) }}
+      max-parallel: 1
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install aas-test-engines
+        run: pip install aas-test-engines
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - uses: grafana/setup-k6-action@v1
+
+      - name: Prepare output directory
+        run: mkdir -p results/${{ matrix.id }}
+
+      - name: Collect environment metadata
+        run: bash harness/collect-env.sh > results/${{ matrix.id }}/env.json
+
+      - name: Start services
+        working-directory: ${{ matrix.adapter_dir }}
+        run: docker compose up -d
+
+      - name: Wait for health
+        run: |
+          HEALTH_URL=$(yq '.health.url' ${{ matrix.adapter_dir }}/sdk.yaml)
+          bash harness/wait-for-health.sh "$HEALTH_URL" 120
+
+      - name: Run conformance tests
+        id: conformance
+        run: |
+          bash harness/conformance/run_aas_test_engines.sh \
+            ${{ matrix.adapter_dir }}/sdk.yaml \
+            results/${{ matrix.id }}
+
+      - name: Run k6 scenario benchmarks
+        if: steps.conformance.outcome == 'success'
+        run: |
+          API_BASE=$(yq '.api_base_url' ${{ matrix.adapter_dir }}/sdk.yaml)
+          k6 run \
+            -e BASE_URL="$API_BASE" \
+            -e SDK_ID="${{ matrix.id }}" \
+            -e OUTPUT_DIR="results/${{ matrix.id }}" \
+            --scenario smoke \
+            harness/k6/scenarios.js
+          k6 run \
+            -e BASE_URL="$API_BASE" \
+            -e SDK_ID="${{ matrix.id }}" \
+            -e OUTPUT_DIR="results/${{ matrix.id }}" \
+            --scenario load \
+            harness/k6/scenarios.js
+          k6 run \
+            -e BASE_URL="$API_BASE" \
+            -e SDK_ID="${{ matrix.id }}" \
+            -e OUTPUT_DIR="results/${{ matrix.id }}" \
+            --scenario spike \
+            harness/k6/scenarios.js
+
+      - name: Run k6 CRUD benchmarks
+        if: steps.conformance.outcome == 'success'
+        run: |
+          API_BASE=$(yq '.api_base_url' ${{ matrix.adapter_dir }}/sdk.yaml)
+          k6 run \
+            -e BASE_URL="$API_BASE" \
+            -e SDK_ID="${{ matrix.id }}" \
+            -e OUTPUT_DIR="results/${{ matrix.id }}" \
+            harness/k6/crud.js
+
+      - name: Tear down services
+        if: always()
+        working-directory: ${{ matrix.adapter_dir }}
+        run: docker compose down -v
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.id }}
+          path: results/${{ matrix.id }}/
+
+  # ── Job 3: Aggregate & deploy to Pages ─────────────────────────
+  deploy:
+    needs: benchmark
+    if: always()
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all result artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: results-*
+          path: results/
+          merge-multiple: false
+
+      - name: Flatten artifact directories
+        run: |
+          # download-artifact creates results/results-<id>/<files>
+          # We need results/<id>/<files>
+          for dir in results/results-*; do
+            sdk_id="${dir#results/results-}"
+            mv "$dir" "results/$sdk_id" 2>/dev/null || true
+          done
+
+      - name: Aggregate results
+        run: python3 scripts/aggregate.py
+
+      - name: Prepare Pages content
+        run: cp -r dashboard _site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

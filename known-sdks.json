@@ -1,0 +1,20 @@
+[
+  {
+    "id": "basyx-java",
+    "name": "Eclipse BaSyx Java v2",
+    "kind": "aas-environment",
+    "repo": "eclipse-basyx/basyx-java-server-sdk",
+    "docker_image": "eclipsebasyx/aas-environment",
+    "adapter_dir": "sdks/basyx-java",
+    "enabled": true
+  },
+  {
+    "id": "faaast-service",
+    "name": "FA³ST Service",
+    "kind": "aas-environment",
+    "repo": "FraunhoferIOSB/FAAAST-Service",
+    "docker_image": "fraunhoferiosb/faaast-service",
+    "adapter_dir": "sdks/faaast-service",
+    "enabled": true
+  }
+]

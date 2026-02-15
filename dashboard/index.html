@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AAS Benchmark Observatory</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --red: #f85149;
+      --yellow: #d29922;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 1.5rem 2rem;
+    }
+
+    header h1 { font-size: 1.5rem; font-weight: 600; }
+    header p { color: var(--text-muted); font-size: 0.875rem; margin-top: 0.25rem; }
+
+    main { max-width: 1200px; margin: 2rem auto; padding: 0 2rem; }
+
+    .timestamp {
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .sdk-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-bottom: 1.5rem;
+      overflow: hidden;
+    }
+
+    .sdk-header {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .sdk-header h2 { font-size: 1.1rem; font-weight: 600; }
+
+    .badge {
+      font-size: 0.75rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      font-weight: 500;
+    }
+
+    .badge-pass { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+    .badge-fail { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+    .badge-na   { background: rgba(139, 148, 158, 0.15); color: var(--text-muted); }
+
+    .sdk-body { padding: 1.5rem; }
+
+    .section-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 0.75rem;
+    }
+
+    .section + .section { margin-top: 1.5rem; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+
+    th {
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    td {
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1rem;
+    }
+
+    .metric-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+    }
+
+    .metric-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 0.25rem;
+    }
+
+    .metric-value {
+      font-size: 1.25rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .loading, .error-msg {
+      text-align: center;
+      padding: 4rem 2rem;
+      color: var(--text-muted);
+    }
+
+    .error-msg { color: var(--red); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AAS Benchmark Observatory</h1>
+    <p>Automated conformance and performance benchmarks for AAS server implementations</p>
+  </header>
+  <main id="app">
+    <div class="loading">Loading results&hellip;</div>
+  </main>
+
+  <script>
+    const app = document.getElementById('app');
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = String(s ?? '');
+      return d.innerHTML;
+    }
+
+    function fmtMs(v) { return v != null ? esc(v.toFixed(1) + ' ms') : '—'; }
+    function fmtNum(v) { return v != null ? esc(v.toFixed(2)) : '—'; }
+
+    function metricBox(label, value) {
+      const box = document.createElement('div');
+      box.className = 'metric-box';
+      const lbl = document.createElement('div');
+      lbl.className = 'metric-label';
+      lbl.textContent = label;
+      const val = document.createElement('div');
+      val.className = 'metric-value';
+      val.textContent = value;
+      box.append(lbl, val);
+      return box;
+    }
+
+    function getConformanceStatus(conf) {
+      if (!conf) return { cls: 'na', label: 'No data' };
+      if (conf.failed === 0) return { cls: 'pass', label: 'All passed' };
+      return { cls: 'fail', label: `${conf.failed} failed` };
+    }
+
+    function buildConformanceSection(conf) {
+      if (!conf) return null;
+      const section = document.createElement('div');
+      section.className = 'section';
+
+      const title = document.createElement('div');
+      title.className = 'section-title';
+      title.textContent = `Conformance (${conf.passed || 0}/${conf.total_profiles || 0} passed)`;
+      section.appendChild(title);
+
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      for (const h of ['Profile', 'Description', 'Status']) {
+        const th = document.createElement('th');
+        th.textContent = h;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      if (conf.results && conf.results.length > 0) {
+        for (const r of conf.results) {
+          const tr = document.createElement('tr');
+          const td1 = document.createElement('td');
+          td1.textContent = r.profile || r.name || '—';
+          const td2 = document.createElement('td');
+          td2.textContent = r.description || '—';
+          const td3 = document.createElement('td');
+          const badge = document.createElement('span');
+          badge.className = `badge badge-${r.passed ? 'pass' : 'fail'}`;
+          badge.textContent = r.passed ? 'Pass' : 'Fail';
+          td3.appendChild(badge);
+          tr.append(td1, td2, td3);
+          tbody.appendChild(tr);
+        }
+      } else {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 3;
+        td.textContent = 'No profile details';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      section.appendChild(table);
+      return section;
+    }
+
+    function buildBenchmarksSection(benchmarks) {
+      if (!benchmarks) return null;
+      const section = document.createElement('div');
+      section.className = 'section';
+
+      const title = document.createElement('div');
+      title.className = 'section-title';
+      title.textContent = 'Performance';
+      section.appendChild(title);
+
+      const grid = document.createElement('div');
+      grid.className = 'metric-grid';
+
+      if (benchmarks.scenarios?.metrics) {
+        const m = benchmarks.scenarios.metrics;
+        const dur = m.http_req_duration?.values;
+        grid.appendChild(metricBox('HTTP Req Duration (p95)', dur?.['p(95)'] != null ? `${dur['p(95)'].toFixed(1)} ms` : '—'));
+        grid.appendChild(metricBox('HTTP Req Duration (med)', dur?.med != null ? `${dur.med.toFixed(1)} ms` : '—'));
+        grid.appendChild(metricBox('Requests/sec', m.http_reqs?.values?.rate != null ? m.http_reqs.values.rate.toFixed(2) : '—'));
+        grid.appendChild(metricBox('Failed Checks', String(m.checks?.values?.fails ?? '—')));
+      }
+
+      if (benchmarks.crud?.metrics) {
+        const m = benchmarks.crud.metrics;
+        const dur = m.http_req_duration?.values;
+        grid.appendChild(metricBox('CRUD Duration (p95)', dur?.['p(95)'] != null ? `${dur['p(95)'].toFixed(1)} ms` : '—'));
+        grid.appendChild(metricBox('CRUD Duration (med)', dur?.med != null ? `${dur.med.toFixed(1)} ms` : '—'));
+        grid.appendChild(metricBox('CRUD Requests/sec', m.http_reqs?.values?.rate != null ? m.http_reqs.values.rate.toFixed(2) : '—'));
+      }
+
+      section.appendChild(grid);
+      return section;
+    }
+
+    function buildEnvSection(env) {
+      if (!env) return null;
+      const section = document.createElement('div');
+      section.className = 'section';
+
+      const title = document.createElement('div');
+      title.className = 'section-title';
+      title.textContent = 'Runner Environment';
+      section.appendChild(title);
+
+      const table = document.createElement('table');
+      const tbody = document.createElement('tbody');
+      const rows = [
+        ['CPU', `${env.cpu_count || '—'} cores`],
+        ['Memory', `${env.total_memory_mb || '—'} MB`],
+        ['Docker', env.docker_version || '—'],
+        ['OS / Arch', `${env.os || '—'} / ${env.arch || '—'}`],
+      ];
+      for (const [label, value] of rows) {
+        const tr = document.createElement('tr');
+        const td1 = document.createElement('td');
+        td1.textContent = label;
+        const td2 = document.createElement('td');
+        td2.textContent = value;
+        tr.append(td1, td2);
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      section.appendChild(table);
+      return section;
+    }
+
+    function render(data) {
+      app.replaceChildren();
+
+      const ts = document.createElement('p');
+      ts.className = 'timestamp';
+      ts.textContent = `Last updated: ${new Date(data.generated_at).toLocaleString()}`;
+      app.appendChild(ts);
+
+      if (!data.sdks || data.sdks.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'loading';
+        empty.textContent = 'No SDK results available yet.';
+        app.appendChild(empty);
+        return;
+      }
+
+      for (const sdk of data.sdks) {
+        const card = document.createElement('div');
+        card.className = 'sdk-card';
+
+        const header = document.createElement('div');
+        header.className = 'sdk-header';
+        const h2 = document.createElement('h2');
+        h2.textContent = sdk.name || sdk.id;
+        header.appendChild(h2);
+
+        const confStatus = getConformanceStatus(sdk.conformance);
+        const badge = document.createElement('span');
+        badge.className = `badge badge-${confStatus.cls}`;
+        badge.textContent = confStatus.label;
+        header.appendChild(badge);
+        card.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'sdk-body';
+
+        const confSection = buildConformanceSection(sdk.conformance);
+        if (confSection) body.appendChild(confSection);
+
+        const benchSection = buildBenchmarksSection(sdk.benchmarks);
+        if (benchSection) body.appendChild(benchSection);
+
+        const envSection = buildEnvSection(sdk.env);
+        if (envSection) body.appendChild(envSection);
+
+        card.appendChild(body);
+        app.appendChild(card);
+      }
+    }
+
+    async function loadResults() {
+      try {
+        const res = await fetch('data/results.json');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        render(data);
+      } catch (err) {
+        app.replaceChildren();
+        const errDiv = document.createElement('div');
+        errDiv.className = 'error-msg';
+        errDiv.textContent = 'Could not load results. Run the benchmark workflow first.';
+        const small = document.createElement('small');
+        small.textContent = err.message;
+        errDiv.appendChild(document.createElement('br'));
+        errDiv.appendChild(small);
+        app.appendChild(errDiv);
+      }
+    }
+
+    loadResults();
+  </script>
+</body>
+</html>

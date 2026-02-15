@@ -1,0 +1,13 @@
+services:
+  faaast:
+    image: fraunhoferiosb/faaast-service:latest
+    ports:
+      - "8080:443"
+    volumes:
+      - ./faaast-config.json:/app/config.json
+      - ./model.json:/app/model.json
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:443/api/v3.0/shells"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

@@ -1,0 +1,16 @@
+id: basyx-java
+name: "Eclipse BaSyx Java v2"
+kind: aas-environment
+api_base_url: http://localhost:8081
+health:
+  url: http://localhost:8081/actuator/health
+  method: GET
+  expect_status: 200
+conformance:
+  profiles:
+    - name: SSP-002
+      description: "AAS Repository Service"
+      endpoint: /api/v3.0
+    - name: SSP-002
+      description: "Submodel Repository Service"
+      endpoint: /api/v3.0

@@ -1,0 +1,96 @@
+name: PR Smoke Test
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "sdks/**"
+      - "harness/**"
+      - "known-sdks.json"
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.changed.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed SDKs
+        id: changed
+        run: |
+          CHANGED_DIRS=$(git diff --name-only origin/main...HEAD -- sdks/ \
+            | cut -d/ -f1-2 \
+            | sort -u)
+
+          if [ -z "$CHANGED_DIRS" ]; then
+            # If no SDK dirs changed directly, test all enabled SDKs
+            MATRIX=$(bash scripts/set-matrix.sh)
+          else
+            INCLUDES="[]"
+            for dir in $CHANGED_DIRS; do
+              SDK_ID=$(basename "$dir")
+              if jq -e --arg id "$SDK_ID" '.[] | select(.id == $id and .enabled == true)' known-sdks.json > /dev/null 2>&1; then
+                INCLUDES=$(echo "$INCLUDES" | jq -c --arg id "$SDK_ID" --arg dir "$dir" \
+                  '. + [{"id": $id, "adapter_dir": $dir}]')
+              fi
+            done
+            MATRIX=$(echo "$INCLUDES" | jq -c '{include: .}')
+          fi
+
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  smoke:
+    needs: detect
+    if: fromJSON(needs.detect.outputs.matrix).include[0] != null
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
+      fail-fast: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install aas-test-engines
+        run: pip install aas-test-engines
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - uses: grafana/setup-k6-action@v1
+
+      - name: Start services
+        working-directory: ${{ matrix.adapter_dir }}
+        run: docker compose up -d
+
+      - name: Wait for health
+        run: |
+          HEALTH_URL=$(yq '.health.url' ${{ matrix.adapter_dir }}/sdk.yaml)
+          bash harness/wait-for-health.sh "$HEALTH_URL" 120
+
+      - name: Run conformance tests
+        run: |
+          mkdir -p results/${{ matrix.id }}
+          bash harness/conformance/run_aas_test_engines.sh \
+            ${{ matrix.adapter_dir }}/sdk.yaml \
+            results/${{ matrix.id }}
+
+      - name: Run k6 smoke scenario
+        run: |
+          API_BASE=$(yq '.api_base_url' ${{ matrix.adapter_dir }}/sdk.yaml)
+          mkdir -p results/${{ matrix.id }}
+          k6 run \
+            -e BASE_URL="$API_BASE" \
+            -e SDK_ID="${{ matrix.id }}" \
+            -e OUTPUT_DIR="results/${{ matrix.id }}" \
+            --scenario smoke \
+            harness/k6/scenarios.js
+
+      - name: Tear down services
+        if: always()
+        working-directory: ${{ matrix.adapter_dir }}
+        run: docker compose down -v
