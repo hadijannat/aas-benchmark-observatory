@@ -13,8 +13,20 @@ namespace AasBenchmark;
 [MemoryDiagnoser]
 public class PipelineBenchmarks
 {
-    [Params("wide", "deep", "mixed")]
-    public string Dataset { get; set; } = "wide";
+    [ParamsSource(nameof(AvailableDatasets))]
+    public string Dataset { get; set; } = "mixed";
+
+    public static IEnumerable<string> AvailableDatasets()
+    {
+        var dir = Environment.GetEnvironmentVariable("DATASETS_DIR") ?? "";
+        if (Directory.Exists(dir))
+        {
+            return Directory.GetFiles(dir, "*.json")
+                .Select(f => Path.GetFileNameWithoutExtension(f))
+                .OrderBy(n => n);
+        }
+        return new[] { "wide", "deep", "mixed" };
+    }
 
     private string _rawJson = string.Empty;
     private JsonNode? _jsonNode;
@@ -30,11 +42,6 @@ public class PipelineBenchmarks
         }
 
         var filePath = Path.Combine(datasetsDir, $"{Dataset}.json");
-        if (!File.Exists(filePath))
-        {
-            throw new FileNotFoundException($"Dataset file not found: {filePath}");
-        }
-
         _rawJson = File.ReadAllText(filePath);
         _jsonNode = JsonNode.Parse(_rawJson);
         _env = Aas.Jsonization.Deserialize.EnvironmentFrom(_jsonNode!);

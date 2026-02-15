@@ -137,6 +137,7 @@ jobs:
     needs: detect
     if: fromJSON(needs.detect.outputs.sdk_matrix).include[0] != null
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix: ${{ fromJSON(needs.detect.outputs.sdk_matrix) }}
       fail-fast: false
