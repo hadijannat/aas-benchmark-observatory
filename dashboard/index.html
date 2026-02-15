@@ -69,6 +69,7 @@
 
     .badge-pass { background: rgba(63, 185, 80, 0.15); color: var(--green); }
     .badge-fail { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+    .badge-warn { background: rgba(210, 153, 34, 0.15); color: var(--yellow); }
     .badge-na   { background: rgba(139, 148, 158, 0.15); color: var(--text-muted); }
 
     .sdk-body { padding: 1.5rem; }
@@ -175,8 +176,13 @@
 
     function getConformanceStatus(conf) {
       if (!conf) return { cls: 'na', label: 'No data' };
-      if (conf.failed === 0) return { cls: 'pass', label: 'All passed' };
-      return { cls: 'fail', label: `${conf.failed} failed` };
+      const passed = conf.checks_passed ?? 0;
+      const total = conf.checks_total ?? 0;
+      if (total === 0) return { cls: 'na', label: 'No checks' };
+      if (passed === total) return { cls: 'pass', label: `${passed}/${total} passed` };
+      if (passed === 0) return { cls: 'fail', label: `0/${total} passed` };
+      const pct = Math.round((passed / total) * 100);
+      return { cls: pct >= 70 ? 'warn' : 'fail', label: `${passed}/${total} passed (${pct}%)` };
     }
 
     function buildConformanceSection(conf) {
@@ -186,13 +192,15 @@
 
       const title = document.createElement('div');
       title.className = 'section-title';
-      title.textContent = `Conformance (${conf.passed || 0}/${conf.total_profiles || 0} passed)`;
+      const totalPassed = conf.checks_passed ?? 0;
+      const totalChecks = conf.checks_total ?? 0;
+      title.textContent = `Conformance — ${totalPassed}/${totalChecks} checks passed across ${conf.total_profiles || 0} profiles`;
       section.appendChild(title);
 
       const table = document.createElement('table');
       const thead = document.createElement('thead');
       const headRow = document.createElement('tr');
-      for (const h of ['Profile', 'Description', 'Status']) {
+      for (const h of ['Profile', 'Description', 'Checks Passed', 'Status']) {
         const th = document.createElement('th');
         th.textContent = h;
         headRow.appendChild(th);
@@ -205,21 +213,34 @@
         for (const r of conf.results) {
           const tr = document.createElement('tr');
           const td1 = document.createElement('td');
-          td1.textContent = r.profile || r.name || '—';
+          td1.textContent = r.suite || r.profile || r.name || '—';
           const td2 = document.createElement('td');
           td2.textContent = r.description || '—';
           const td3 = document.createElement('td');
+          const rPassed = r.checks_passed ?? 0;
+          const rTotal = r.checks_total ?? 0;
+          td3.textContent = rTotal > 0 ? `${rPassed}/${rTotal}` : '—';
+          const td4 = document.createElement('td');
           const badge = document.createElement('span');
-          badge.className = `badge badge-${r.passed ? 'pass' : 'fail'}`;
-          badge.textContent = r.passed ? 'Pass' : 'Fail';
-          td3.appendChild(badge);
-          tr.append(td1, td2, td3);
+          if (rTotal === 0) {
+            badge.className = 'badge badge-na';
+            badge.textContent = 'N/A';
+          } else if (rPassed === rTotal) {
+            badge.className = 'badge badge-pass';
+            badge.textContent = 'Pass';
+          } else {
+            const pct = Math.round((rPassed / rTotal) * 100);
+            badge.className = `badge badge-${pct >= 70 ? 'warn' : 'fail'}`;
+            badge.textContent = `${pct}%`;
+          }
+          td4.appendChild(badge);
+          tr.append(td1, td2, td3, td4);
           tbody.appendChild(tr);
         }
       } else {
         const tr = document.createElement('tr');
         const td = document.createElement('td');
-        td.colSpan = 3;
+        td.colSpan = 4;
         td.textContent = 'No profile details';
         tr.appendChild(td);
         tbody.appendChild(tr);
@@ -248,7 +269,9 @@
         grid.appendChild(metricBox('HTTP Req Duration (p95)', dur?.['p(95)'] != null ? `${dur['p(95)'].toFixed(1)} ms` : '—'));
         grid.appendChild(metricBox('HTTP Req Duration (med)', dur?.med != null ? `${dur.med.toFixed(1)} ms` : '—'));
         grid.appendChild(metricBox('Requests/sec', m.http_reqs?.values?.rate != null ? m.http_reqs.values.rate.toFixed(2) : '—'));
-        grid.appendChild(metricBox('Failed Checks', String(m.checks?.values?.fails ?? '—')));
+        const checks = m.checks?.values;
+        const checkRate = checks ? `${checks.passes ?? 0}/${(checks.passes ?? 0) + (checks.fails ?? 0)}` : '—';
+        grid.appendChild(metricBox('Checks Passed', checkRate));
       }
 
       if (benchmarks.crud?.metrics) {

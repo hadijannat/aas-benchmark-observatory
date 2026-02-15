@@ -1,5 +1,6 @@
 import http from "k6/http";
 import { check, group } from "k6";
+import encoding from "k6/encoding";
 
 const BASE_URL = __ENV.BASE_URL;
 const SDK_ID = __ENV.SDK_ID;
@@ -10,8 +11,8 @@ export const options = {
   iterations: 100,
 };
 
-function doubleEncode(id) {
-  return encodeURIComponent(encodeURIComponent(id));
+function base64UrlEncode(id) {
+  return encoding.b64encode(id, "rawurl");
 }
 
 export default function () {
@@ -38,7 +39,7 @@ export default function () {
 
   group("Read AAS Shell", function () {
     const res = http.get(
-      `${BASE_URL}/shells/${doubleEncode(shellId)}`
+      `${BASE_URL}/shells/${base64UrlEncode(shellId)}`
     );
     check(res, {
       "GET /shells/{id} status is 200": (r) => r.status === 200,
@@ -47,7 +48,7 @@ export default function () {
 
   group("Delete AAS Shell", function () {
     const res = http.del(
-      `${BASE_URL}/shells/${doubleEncode(shellId)}`
+      `${BASE_URL}/shells/${base64UrlEncode(shellId)}`
     );
     check(res, {
       "DELETE /shells/{id} status is 200 or 204": (r) =>

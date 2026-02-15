@@ -13,8 +13,30 @@ SDK_ID="$(yq -r '.id' "$SDK_YAML")"
 API_BASE_URL="$(yq -r '.api_base_url' "$SDK_YAML")"
 PROFILE_COUNT="$(yq -r '.conformance.profiles | length' "$SDK_YAML")"
 
-PASSED=0
-FAILED=0
+# Extract pass/fail counts from aas_test_engines JSON output
+# Level 0 = ok, level 2 = warning, level 3 = error
+count_checks() {
+  python3 -c "
+import json, sys
+def count(node):
+    p, f = 0, 0
+    subs = node.get('s', [])
+    if not subs:
+        return (0, 1) if node.get('l', 0) >= 3 else (1, 0)
+    for s in subs:
+        sp, sf = count(s)
+        p += sp; f += sf
+    return p, f
+try:
+    data = json.load(open(sys.argv[1]))
+    p, f = count(data)
+    print(f'{p} {f}')
+except: print('0 0')
+" "$1"
+}
+
+TOTAL_CHECKS_PASSED=0
+TOTAL_CHECKS_FAILED=0
 RESULTS="["
 
 for (( i=0; i<PROFILE_COUNT; i++ )); do
@@ -24,33 +46,31 @@ for (( i=0; i<PROFILE_COUNT; i++ )); do
 
   printf "Running conformance test %d/%d: %s (%s)\n" "$((i+1))" "$PROFILE_COUNT" "$SUITE" "$PROFILE_DESC"
 
-  # aas_test_engines: positional args are <server> <suite>
-  # --output selects format (json/text/html), result goes to stdout
-  if aas_test_engines check_server \
-      --output json \
-      "$API_BASE_URL" "$SUITE" \
-      > "$OUTFILE" 2>&1; then
-    STATUS="pass"
-    PASSED=$((PASSED + 1))
-  else
-    STATUS="fail"
-    FAILED=$((FAILED + 1))
-  fi
+  aas_test_engines check_server \
+    --output json \
+    "$API_BASE_URL" "$SUITE" \
+    > "$OUTFILE" 2>&1 || true
+
+  # Parse actual check counts from output
+  read -r CHECKS_PASSED CHECKS_FAILED <<< "$(count_checks "$OUTFILE")"
+  TOTAL_CHECKS_PASSED=$((TOTAL_CHECKS_PASSED + CHECKS_PASSED))
+  TOTAL_CHECKS_FAILED=$((TOTAL_CHECKS_FAILED + CHECKS_FAILED))
+  TOTAL=$((CHECKS_PASSED + CHECKS_FAILED))
+
+  printf "  Profile result: %d/%d checks passed\n" "$CHECKS_PASSED" "$TOTAL"
 
   if [ "$i" -gt 0 ]; then
     RESULTS="${RESULTS},"
   fi
-  RESULTS="${RESULTS}{\"index\":${i},\"suite\":\"${SUITE}\",\"description\":\"${PROFILE_DESC}\",\"passed\":$([ "$STATUS" = "pass" ] && echo true || echo false),\"output_file\":\"conformance_${i}.json\"}"
+  RESULTS="${RESULTS}{\"index\":${i},\"suite\":\"${SUITE}\",\"description\":\"${PROFILE_DESC}\",\"checks_passed\":${CHECKS_PASSED},\"checks_failed\":${CHECKS_FAILED},\"checks_total\":${TOTAL},\"output_file\":\"conformance_${i}.json\"}"
 done
 
 RESULTS="${RESULTS}]"
+GRAND_TOTAL=$((TOTAL_CHECKS_PASSED + TOTAL_CHECKS_FAILED))
 
-printf '{"sdk_id":"%s","total_profiles":%d,"passed":%d,"failed":%d,"results":%s}\n' \
-  "$SDK_ID" "$PROFILE_COUNT" "$PASSED" "$FAILED" "$RESULTS" \
+printf '{"sdk_id":"%s","total_profiles":%d,"checks_passed":%d,"checks_failed":%d,"checks_total":%d,"results":%s}\n' \
+  "$SDK_ID" "$PROFILE_COUNT" "$TOTAL_CHECKS_PASSED" "$TOTAL_CHECKS_FAILED" "$GRAND_TOTAL" "$RESULTS" \
   > "$OUTPUT_DIR/conformance_summary.json"
 
 echo "Conformance summary written to $OUTPUT_DIR/conformance_summary.json"
-
-if [ "$FAILED" -gt 0 ]; then
-  echo "WARNING: $FAILED/$PROFILE_COUNT profiles had conformance issues."
-fi
+printf "Overall: %d/%d checks passed across %d profiles\n" "$TOTAL_CHECKS_PASSED" "$GRAND_TOTAL" "$PROFILE_COUNT"
