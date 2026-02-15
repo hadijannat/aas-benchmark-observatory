@@ -92,6 +92,17 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Set up Java
+        if: matrix.language == 'java'
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Set up Rust
+        if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Run benchmarks
         run: bash ${{ matrix.adapter_dir }}/run-benchmarks.sh datasets/generated results/${{ matrix.id }}
 

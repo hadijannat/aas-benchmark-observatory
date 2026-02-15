@@ -1,0 +1,13 @@
+id: aas-core3-java
+name: "aas-core3.0 Java"
+language: java
+operations:
+  - deserialize
+  - validate
+  - traverse
+  - update
+  - serialize
+datasets:
+  - wide
+  - deep
+  - mixed

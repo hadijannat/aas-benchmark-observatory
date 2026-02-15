@@ -25,7 +25,7 @@
       "repo": "aas-core-works/aas-core3.0-csharp",
       "package": "AasCore.Aas3_0",
       "adapter_dir": "sdks/aas-core3-csharp",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "aas-core3-typescript",
@@ -34,6 +34,24 @@
       "repo": "aas-core-works/aas-core3.0-typescript",
       "package": "@aas-core-works/aas-core3.0-typescript",
       "adapter_dir": "sdks/aas-core3-typescript",
+      "enabled": true
+    },
+    {
+      "id": "aas-core3-java",
+      "name": "aas-core3.0 Java",
+      "language": "java",
+      "repo": "aas-core-works/aas-core3.0-java",
+      "package": "io.github.aas-core-works:aas-core3.0-java",
+      "adapter_dir": "sdks/aas-core3-java",
+      "enabled": true
+    },
+    {
+      "id": "basyx-rust",
+      "name": "BaSyx Rust SDK",
+      "language": "rust",
+      "repo": "eclipse-basyx/basyx-rust-sdk",
+      "package": "basyx-rs",
+      "adapter_dir": "sdks/basyx-rust",
       "enabled": true
     }
   ],
