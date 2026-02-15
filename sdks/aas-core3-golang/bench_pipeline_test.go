@@ -91,11 +91,12 @@ func BenchmarkValidate(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				errors := make([]string, 0)
-				for verErr := range aasverification.Verify(env) {
-					errors = append(errors, verErr.Error())
-				}
-				_ = errors
+				errorCount := 0
+				aasverification.Verify(env, func(_ *aasverification.VerificationError) bool {
+					errorCount++
+					return false // continue verification
+				})
+				_ = errorCount
 			}
 		})
 	}
@@ -115,9 +116,10 @@ func BenchmarkTraverse(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				count := 0
-				for range env.Descend() {
+				env.Descend(func(_ aastypes.IClass) bool {
 					count++
-				}
+					return false // continue descending
+				})
 				_ = count
 			}
 		})
@@ -138,7 +140,7 @@ func BenchmarkUpdate(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				count := 0
-				for node := range env.Descend() {
+				env.Descend(func(node aastypes.IClass) bool {
 					if prop, ok := node.(aastypes.IProperty); ok {
 						val := prop.Value()
 						if val != nil {
@@ -147,7 +149,8 @@ func BenchmarkUpdate(b *testing.B) {
 							count++
 						}
 					}
-				}
+					return false // continue descending
+				})
 				_ = count
 			}
 		})
@@ -167,7 +170,10 @@ func BenchmarkSerialize(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				jsonable := aas.ToJsonable(env)
+				jsonable, serErr := aas.ToJsonable(env)
+				if serErr != nil {
+					b.Fatal(serErr)
+				}
 				data, marshalErr := json.Marshal(jsonable)
 				if marshalErr != nil {
 					b.Fatal(marshalErr)

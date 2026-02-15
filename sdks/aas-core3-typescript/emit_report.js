@@ -8,11 +8,12 @@
  * tinybench results have `mean` in milliseconds — we convert to nanoseconds.
  */
 
-"use strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const fs = require("node:fs");
-const path = require("node:path");
-const { execSync } = require("node:child_process");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 function msToNs(ms) {
   if (ms === null || ms === undefined) {
@@ -34,9 +35,6 @@ function main() {
 
   const rawData = fs.readFileSync(inputPath, "utf-8");
   const benchResults = JSON.parse(rawData);
-
-  // benchResults is an array of:
-  // { dataset, operation, iterations, meanMs, medianMs, stddevMs, minMs, maxMs, p75Ms, p99Ms, memory }
 
   // Organize by dataset
   const datasets = {};
