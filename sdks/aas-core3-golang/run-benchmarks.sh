@@ -8,12 +8,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 mkdir -p "$OUTPUT_DIR"
 
+# Convert to absolute paths before cd
+DATASETS_DIR="$(cd "$DATASETS_DIR" && pwd)"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 export DATASETS_DIR
 
 cd "$SCRIPT_DIR"
 
-# Download Go module dependencies
-go mod download
+# Download Go module dependencies and generate go.sum
+go mod tidy
 
 # Run Go benchmarks with JSON output
 # -count=5 for statistical significance, -benchmem for allocation stats

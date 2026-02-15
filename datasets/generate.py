@@ -105,7 +105,6 @@ def make_environment(shells, submodels):
     return {
         "assetAdministrationShells": shells,
         "submodels": submodels,
-        "assets": [],
     }
 
 

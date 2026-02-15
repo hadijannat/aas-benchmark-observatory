@@ -8,6 +8,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 mkdir -p "$OUTPUT_DIR"
 
+# Convert to absolute paths
+DATASETS_DIR="$(cd "$DATASETS_DIR" && pwd)"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
+
 # Install dependencies
 pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
 

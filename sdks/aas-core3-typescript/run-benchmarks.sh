@@ -8,6 +8,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 mkdir -p "$OUTPUT_DIR"
 
+# Convert to absolute paths before cd
+DATASETS_DIR="$(cd "$DATASETS_DIR" && pwd)"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 export DATASETS_DIR
 
 cd "$SCRIPT_DIR"

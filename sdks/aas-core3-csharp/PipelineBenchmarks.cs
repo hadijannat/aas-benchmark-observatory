@@ -18,7 +18,7 @@ public class PipelineBenchmarks
 
     private string _rawJson = string.Empty;
     private JsonNode? _jsonNode;
-    private Aas.Types.IEnvironment? _env;
+    private Aas.IEnvironment? _env;
 
     [GlobalSetup]
     public void Setup()
@@ -41,7 +41,7 @@ public class PipelineBenchmarks
     }
 
     [Benchmark]
-    public Aas.Types.IEnvironment Deserialize()
+    public Aas.IEnvironment Deserialize()
     {
         var node = JsonNode.Parse(_rawJson)!;
         return Aas.Jsonization.Deserialize.EnvironmentFrom(node);
@@ -75,7 +75,7 @@ public class PipelineBenchmarks
         int count = 0;
         foreach (var node in _env!.Descend())
         {
-            if (node is Aas.Types.IProperty prop && prop.Value != null)
+            if (node is Aas.IProperty prop && prop.Value != null)
             {
                 prop.Value = prop.Value + "_updated";
                 count++;
