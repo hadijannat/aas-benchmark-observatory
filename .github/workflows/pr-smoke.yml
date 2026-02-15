@@ -98,7 +98,7 @@ jobs:
             -e BASE_URL="$API_BASE" \
             -e SDK_ID="${{ matrix.id }}" \
             -e OUTPUT_DIR="results/${{ matrix.id }}" \
-            --scenario smoke \
+            -e SCENARIO=smoke \
             harness/k6/scenarios.js
 
       - name: Tear down services

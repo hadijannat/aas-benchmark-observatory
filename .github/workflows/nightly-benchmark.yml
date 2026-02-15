@@ -101,19 +101,6 @@ jobs:
             -e BASE_URL="$API_BASE" \
             -e SDK_ID="${{ matrix.id }}" \
             -e OUTPUT_DIR="results/${{ matrix.id }}" \
-            --scenario smoke \
-            harness/k6/scenarios.js
-          k6 run \
-            -e BASE_URL="$API_BASE" \
-            -e SDK_ID="${{ matrix.id }}" \
-            -e OUTPUT_DIR="results/${{ matrix.id }}" \
-            --scenario load \
-            harness/k6/scenarios.js
-          k6 run \
-            -e BASE_URL="$API_BASE" \
-            -e SDK_ID="${{ matrix.id }}" \
-            -e OUTPUT_DIR="results/${{ matrix.id }}" \
-            --scenario spike \
             harness/k6/scenarios.js
 
       - name: Run k6 CRUD benchmarks
