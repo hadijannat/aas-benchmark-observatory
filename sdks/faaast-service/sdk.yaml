@@ -1,7 +1,7 @@
 id: faaast-service
 name: "FA³ST Service"
 kind: aas-environment
-api_base_url: http://localhost:8080
+api_base_url: http://localhost:8080/api/v3.0
 health:
   url: http://localhost:8080/api/v3.0/shells
   method: GET

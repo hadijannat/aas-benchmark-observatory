@@ -24,14 +24,13 @@ export default function () {
     const payload = JSON.stringify({
       id: shellId,
       idShort: `bench-shell-${__VU}-${__ITER}`,
-      modelType: "AssetAdministrationShell",
       assetInformation: {
         assetKind: "Instance",
         globalAssetId: `urn:example:asset:${__VU}:${__ITER}`,
       },
     });
 
-    const res = http.post(`${BASE_URL}/api/v3.0/shells`, payload, params);
+    const res = http.post(`${BASE_URL}/shells`, payload, params);
     check(res, {
       "POST /shells status is 201": (r) => r.status === 201,
     });
@@ -39,7 +38,7 @@ export default function () {
 
   group("Read AAS Shell", function () {
     const res = http.get(
-      `${BASE_URL}/api/v3.0/shells/${doubleEncode(shellId)}`
+      `${BASE_URL}/shells/${doubleEncode(shellId)}`
     );
     check(res, {
       "GET /shells/{id} status is 200": (r) => r.status === 200,
@@ -48,7 +47,7 @@ export default function () {
 
   group("Delete AAS Shell", function () {
     const res = http.del(
-      `${BASE_URL}/api/v3.0/shells/${doubleEncode(shellId)}`
+      `${BASE_URL}/shells/${doubleEncode(shellId)}`
     );
     check(res, {
       "DELETE /shells/{id} status is 200 or 204": (r) =>

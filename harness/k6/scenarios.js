@@ -36,12 +36,12 @@ export const options = {
 };
 
 export default function () {
-  const shellsRes = http.get(`${BASE_URL}/api/v3.0/shells`);
+  const shellsRes = http.get(`${BASE_URL}/shells`);
   check(shellsRes, {
     "GET /shells status is 200": (r) => r.status === 200,
   });
 
-  const submodelsRes = http.get(`${BASE_URL}/api/v3.0/submodels`);
+  const submodelsRes = http.get(`${BASE_URL}/submodels`);
   check(submodelsRes, {
     "GET /submodels status is 200": (r) => r.status === 200,
   });

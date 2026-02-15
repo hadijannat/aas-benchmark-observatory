@@ -29,13 +29,13 @@ post_json() {
 }
 
 # Create a minimal submodel (AAS v3.0 JSON serialization format)
-post_json "$API_BASE/api/v3.0/submodels" '{
+post_json "$API_BASE/submodels" '{
   "id": "urn:example:submodel:test-1",
   "idShort": "TestSubmodel"
 }' "submodel urn:example:submodel:test-1"
 
 # Create a minimal AAS shell
-post_json "$API_BASE/api/v3.0/shells" '{
+post_json "$API_BASE/shells" '{
   "id": "urn:example:aas:test-1",
   "idShort": "TestShell",
   "assetInformation": {
