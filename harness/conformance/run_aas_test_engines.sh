@@ -25,9 +25,9 @@ for (( i=0; i<PROFILE_COUNT; i++ )); do
   printf "Running conformance test %d/%d: %s (%s)\n" "$((i+1))" "$PROFILE_COUNT" "$SUITE" "$PROFILE_DESC"
 
   # aas_test_engines: positional args are <server> <suite>
-  # --output selects format (OutputFormats.JSON), result goes to stdout
+  # --output selects format (json/text/html), result goes to stdout
   if aas_test_engines check_server \
-      --output OutputFormats.JSON \
+      --output json \
       "$API_BASE_URL" "$SUITE" \
       > "$OUTFILE" 2>&1; then
     STATUS="pass"
