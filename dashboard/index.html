@@ -262,8 +262,8 @@
 
     function buildSdkComparisonTable(dataset, sdkResults) {
       const entries = sdkResults
-        .filter(s => s.pipeline && s.pipeline[dataset])
-        .map(s => ({ id: s.id, name: s.name, data: s.pipeline[dataset] }));
+        .filter(s => s.pipeline?.datasets?.[dataset])
+        .map(s => ({ id: s.id, name: s.name, lang: s.pipeline.metadata?.language, data: s.pipeline.datasets[dataset] }));
 
       if (entries.length === 0) return null;
 
@@ -297,8 +297,17 @@
       thead.appendChild(headRow);
       table.appendChild(thead);
 
+      // Build union of all operations for this dataset
+      const opSet = new Set();
+      for (const e of entries) {
+        for (const op of Object.keys(e.data.operations || {})) opSet.add(op);
+      }
+      const ops = OPS.filter(op => opSet.has(op));
+      // Append any extra operations not in the canonical list
+      for (const op of opSet) { if (!ops.includes(op)) ops.push(op); }
+
       const tbody = document.createElement('tbody');
-      for (const op of OPS) {
+      for (const op of ops) {
         const tr = document.createElement('tr');
         const tdOp = document.createElement('td');
         tdOp.textContent = op;
@@ -349,27 +358,40 @@
       h2.textContent = sdk.name || sdk.id;
       header.appendChild(h2);
 
-      if (sdk.pipeline) {
+      const meta = sdk.pipeline?.metadata;
+      if (meta?.language) {
         const langBadge = document.createElement('span');
         langBadge.className = 'badge badge-lang';
-        // Infer language from the first dataset's metadata or id
-        const lang = sdk.id.includes('python') ? 'Python' :
-                     sdk.id.includes('golang') ? 'Go' :
-                     sdk.id.includes('csharp') ? 'C#' :
-                     sdk.id.includes('typescript') ? 'TypeScript' : '';
-        if (lang) {
-          langBadge.textContent = lang;
-          header.appendChild(langBadge);
-        }
+        langBadge.textContent = meta.language.charAt(0).toUpperCase() + meta.language.slice(1);
+        header.appendChild(langBadge);
       }
       card.appendChild(header);
 
       const body = document.createElement('div');
       body.className = 'sdk-body';
 
-      if (sdk.pipeline) {
+      // Metadata section (runtime, harness, package version)
+      if (meta) {
+        const metaSection = document.createElement('div');
+        metaSection.className = 'section';
+        const metaTitle = document.createElement('div');
+        metaTitle.className = 'section-title';
+        metaTitle.textContent = 'SDK Info';
+        metaSection.appendChild(metaTitle);
+
+        const metaGrid = document.createElement('div');
+        metaGrid.className = 'metric-grid';
+        if (meta.runtime_version) metaGrid.appendChild(metricBox('Runtime', meta.runtime_version));
+        if (meta.benchmark_harness) metaGrid.appendChild(metricBox('Harness', meta.benchmark_harness));
+        if (meta.sdk_package_version) metaGrid.appendChild(metricBox('Package Version', meta.sdk_package_version));
+        metaSection.appendChild(metaGrid);
+        body.appendChild(metaSection);
+      }
+
+      const datasets = sdk.pipeline?.datasets;
+      if (datasets) {
         for (const ds of DATASETS) {
-          const dsData = sdk.pipeline[ds];
+          const dsData = datasets[ds];
           if (!dsData?.operations) continue;
 
           const section = document.createElement('div');
@@ -383,7 +405,7 @@
           const grid = document.createElement('div');
           grid.className = 'metric-grid';
 
-          for (const op of OPS) {
+          for (const op of Object.keys(dsData.operations)) {
             const opData = dsData.operations[op];
             if (!opData) continue;
             grid.appendChild(metricBox(op + ' (mean)', fmtNs(opData.mean_ns)));
@@ -627,7 +649,13 @@
       app.appendChild(ts);
 
       // Backward compat: if old format (data.sdks), treat as server_benchmarks
-      const sdkResults = data.sdk_benchmarks || [];
+      const sdkResults = (data.sdk_benchmarks || []).map(s => {
+        // Normalize: if pipeline lacks .datasets key, it's the old format (pipeline IS datasets)
+        if (s.pipeline && !s.pipeline.datasets && !s.pipeline.schema_version) {
+          s.pipeline = { datasets: s.pipeline, metadata: {} };
+        }
+        return s;
+      });
       const serverResults = data.server_benchmarks || data.sdks || [];
 
       const tabBar = document.createElement('div');
