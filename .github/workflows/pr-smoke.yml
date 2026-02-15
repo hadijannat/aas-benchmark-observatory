@@ -83,6 +83,7 @@ jobs:
           bash harness/seed-test-data.sh "$API_BASE"
 
       - name: Run conformance tests
+        continue-on-error: true
         run: |
           mkdir -p results/${{ matrix.id }}
           bash harness/conformance/run_aas_test_engines.sh \

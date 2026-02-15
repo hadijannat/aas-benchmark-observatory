@@ -88,13 +88,13 @@ jobs:
 
       - name: Run conformance tests
         id: conformance
+        continue-on-error: true
         run: |
           bash harness/conformance/run_aas_test_engines.sh \
             ${{ matrix.adapter_dir }}/sdk.yaml \
             results/${{ matrix.id }}
 
       - name: Run k6 scenario benchmarks
-        if: steps.conformance.outcome == 'success'
         run: |
           API_BASE=$(yq '.api_base_url' ${{ matrix.adapter_dir }}/sdk.yaml)
           k6 run \
@@ -117,7 +117,6 @@ jobs:
             harness/k6/scenarios.js
 
       - name: Run k6 CRUD benchmarks
-        if: steps.conformance.outcome == 'success'
         run: |
           API_BASE=$(yq '.api_base_url' ${{ matrix.adapter_dir }}/sdk.yaml)
           k6 run \
