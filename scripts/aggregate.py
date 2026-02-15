@@ -94,7 +94,7 @@ def _load_names(known_sdks: Path) -> dict[str, str]:
             ks = json.load(f)
         for entry in ks.get("sdk_benchmarks", []) + ks.get("server_benchmarks", []):
             names[entry["id"]] = entry.get("name", entry["id"])
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
         pass
     return names
 
