@@ -32,5 +32,12 @@ Thumbs.db
 .env
 .env.local
 
+# Worktrees
+.worktrees/
+
+# Generated datasets
+datasets/*.json
+datasets/generated/
+
 # Claude Code
 CLAUDE.md

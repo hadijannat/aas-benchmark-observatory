@@ -1,0 +1,13 @@
+id: aas-core3-golang
+name: aas-core3.0 Go
+language: go
+operations:
+  - deserialize
+  - validate
+  - traverse
+  - update
+  - serialize
+datasets:
+  - wide
+  - deep
+  - mixed

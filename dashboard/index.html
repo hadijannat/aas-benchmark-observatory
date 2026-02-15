@@ -42,6 +42,33 @@
       margin-bottom: 1.5rem;
     }
 
+    /* Tab bar */
+    .tab-bar {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 1.5rem;
+    }
+
+    .tab-btn {
+      padding: 0.75rem 1.5rem;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Cards */
     .sdk-card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -71,6 +98,11 @@
     .badge-fail { background: rgba(248, 81, 73, 0.15); color: var(--red); }
     .badge-warn { background: rgba(210, 153, 34, 0.15); color: var(--yellow); }
     .badge-na   { background: rgba(139, 148, 158, 0.15); color: var(--text-muted); }
+    .badge-lang {
+      background: rgba(88, 166, 255, 0.15);
+      color: var(--accent);
+      font-size: 0.7rem;
+    }
 
     .sdk-body { padding: 1.5rem; }
 
@@ -106,6 +138,8 @@
 
     tr:last-child td { border-bottom: none; }
 
+    td.fastest { color: var(--green); font-weight: 600; }
+
     .metric-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -138,12 +172,31 @@
     }
 
     .error-msg { color: var(--red); }
+
+    .dataset-section { margin-bottom: 2rem; }
+    .dataset-section h3 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: var(--text);
+    }
+    .dataset-section .meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 0.75rem;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 3rem 2rem;
+      color: var(--text-muted);
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>AAS Benchmark Observatory</h1>
-    <p>Automated conformance and performance benchmarks for AAS server implementations</p>
+    <p>Automated conformance, performance, and SDK pipeline benchmarks for AAS implementations</p>
   </header>
   <main id="app">
     <div class="loading">Loading results&hellip;</div>
@@ -158,8 +211,24 @@
       return d.innerHTML;
     }
 
-    function fmtMs(v) { return v != null ? esc(v.toFixed(1) + ' ms') : '—'; }
-    function fmtNum(v) { return v != null ? esc(v.toFixed(2)) : '—'; }
+    function fmtNs(ns) {
+      if (ns == null) return '\u2014';
+      if (ns < 1000) return ns.toFixed(0) + ' ns';
+      if (ns < 1e6) return (ns / 1e3).toFixed(1) + ' \u00b5s';
+      if (ns < 1e9) return (ns / 1e6).toFixed(1) + ' ms';
+      return (ns / 1e9).toFixed(2) + ' s';
+    }
+
+    function fmtBytes(b) {
+      if (b == null) return '\u2014';
+      if (b < 1024) return b + ' B';
+      if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+      if (b < 1024 * 1024 * 1024) return (b / (1024 * 1024)).toFixed(1) + ' MB';
+      return (b / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+    }
+
+    function fmtMs(v) { return v != null ? v.toFixed(1) + ' ms' : '\u2014'; }
+    function fmtNum(v) { return v != null ? v.toFixed(2) : '\u2014'; }
 
     function metricBox(label, value) {
       const box = document.createElement('div');
@@ -174,6 +243,193 @@
       return box;
     }
 
+    // ── Tab switching ──────────────────────────────────────
+    function setupTabs() {
+      const btns = document.querySelectorAll('.tab-btn');
+      btns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          btns.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+          document.getElementById(btn.dataset.tab).classList.add('active');
+        });
+      });
+    }
+
+    // ── SDK Pipeline Benchmarks tab ────────────────────────
+    const OPS = ['deserialize', 'validate', 'traverse', 'update', 'serialize'];
+    const DATASETS = ['wide', 'deep', 'mixed'];
+
+    function buildSdkComparisonTable(dataset, sdkResults) {
+      const entries = sdkResults
+        .filter(s => s.pipeline && s.pipeline[dataset])
+        .map(s => ({ id: s.id, name: s.name, data: s.pipeline[dataset] }));
+
+      if (entries.length === 0) return null;
+
+      const section = document.createElement('div');
+      section.className = 'dataset-section';
+
+      const h3 = document.createElement('h3');
+      h3.textContent = dataset.charAt(0).toUpperCase() + dataset.slice(1) + ' Dataset';
+      section.appendChild(h3);
+
+      const firstEntry = entries[0].data;
+      if (firstEntry.file_size_bytes || firstEntry.element_count) {
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        const parts = [];
+        if (firstEntry.file_size_bytes) parts.push(fmtBytes(firstEntry.file_size_bytes));
+        if (firstEntry.element_count) parts.push(firstEntry.element_count.toLocaleString() + ' elements');
+        meta.textContent = parts.join(' \u00b7 ');
+        section.appendChild(meta);
+      }
+
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      const headers = ['Operation', ...entries.map(e => e.name), 'Fastest'];
+      for (const h of headers) {
+        const th = document.createElement('th');
+        th.textContent = h;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      for (const op of OPS) {
+        const tr = document.createElement('tr');
+        const tdOp = document.createElement('td');
+        tdOp.textContent = op;
+        tr.appendChild(tdOp);
+
+        let minNs = Infinity;
+        let fastestName = '\u2014';
+        const values = [];
+
+        for (const entry of entries) {
+          const opData = entry.data.operations?.[op];
+          const meanNs = opData?.mean_ns;
+          values.push(meanNs);
+          if (meanNs != null && meanNs < minNs) {
+            minNs = meanNs;
+            fastestName = entry.name;
+          }
+        }
+
+        for (let i = 0; i < entries.length; i++) {
+          const td = document.createElement('td');
+          td.textContent = fmtNs(values[i]);
+          if (values[i] != null && values[i] === minNs) {
+            td.className = 'fastest';
+          }
+          tr.appendChild(td);
+        }
+
+        const tdFastest = document.createElement('td');
+        tdFastest.textContent = fastestName;
+        tdFastest.className = 'fastest';
+        tr.appendChild(tdFastest);
+
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      section.appendChild(table);
+      return section;
+    }
+
+    function buildSdkDetailCard(sdk) {
+      const card = document.createElement('div');
+      card.className = 'sdk-card';
+
+      const header = document.createElement('div');
+      header.className = 'sdk-header';
+      const h2 = document.createElement('h2');
+      h2.textContent = sdk.name || sdk.id;
+      header.appendChild(h2);
+
+      if (sdk.pipeline) {
+        const langBadge = document.createElement('span');
+        langBadge.className = 'badge badge-lang';
+        // Infer language from the first dataset's metadata or id
+        const lang = sdk.id.includes('python') ? 'Python' :
+                     sdk.id.includes('golang') ? 'Go' :
+                     sdk.id.includes('csharp') ? 'C#' :
+                     sdk.id.includes('typescript') ? 'TypeScript' : '';
+        if (lang) {
+          langBadge.textContent = lang;
+          header.appendChild(langBadge);
+        }
+      }
+      card.appendChild(header);
+
+      const body = document.createElement('div');
+      body.className = 'sdk-body';
+
+      if (sdk.pipeline) {
+        for (const ds of DATASETS) {
+          const dsData = sdk.pipeline[ds];
+          if (!dsData?.operations) continue;
+
+          const section = document.createElement('div');
+          section.className = 'section';
+
+          const title = document.createElement('div');
+          title.className = 'section-title';
+          title.textContent = ds + ' dataset';
+          section.appendChild(title);
+
+          const grid = document.createElement('div');
+          grid.className = 'metric-grid';
+
+          for (const op of OPS) {
+            const opData = dsData.operations[op];
+            if (!opData) continue;
+            grid.appendChild(metricBox(op + ' (mean)', fmtNs(opData.mean_ns)));
+            if (opData.memory?.peak_rss_bytes) {
+              grid.appendChild(metricBox(op + ' (peak RSS)', fmtBytes(opData.memory.peak_rss_bytes)));
+            }
+          }
+
+          section.appendChild(grid);
+          body.appendChild(section);
+        }
+      }
+
+      const envSection = buildEnvSection(sdk.env);
+      if (envSection) body.appendChild(envSection);
+
+      card.appendChild(body);
+      return card;
+    }
+
+    function renderSdkTab(container, sdkResults) {
+      if (!sdkResults || sdkResults.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No SDK pipeline benchmark results available yet.';
+        container.appendChild(empty);
+        return;
+      }
+
+      for (const ds of DATASETS) {
+        const table = buildSdkComparisonTable(ds, sdkResults);
+        if (table) container.appendChild(table);
+      }
+
+      const detailTitle = document.createElement('div');
+      detailTitle.className = 'section-title';
+      detailTitle.textContent = 'Per-SDK Details';
+      detailTitle.style.marginTop = '2rem';
+      container.appendChild(detailTitle);
+
+      for (const sdk of sdkResults) {
+        container.appendChild(buildSdkDetailCard(sdk));
+      }
+    }
+
+    // ── Server API Benchmarks tab ──────────────────────────
     function getConformanceStatus(conf) {
       if (!conf) return { cls: 'na', label: 'No data' };
       const passed = conf.checks_passed ?? 0;
@@ -194,7 +450,7 @@
       title.className = 'section-title';
       const totalPassed = conf.checks_passed ?? 0;
       const totalChecks = conf.checks_total ?? 0;
-      title.textContent = `Conformance — ${totalPassed}/${totalChecks} checks passed across ${conf.total_profiles || 0} profiles`;
+      title.textContent = `Conformance \u2014 ${totalPassed}/${totalChecks} checks passed across ${conf.total_profiles || 0} profiles`;
       section.appendChild(title);
 
       const table = document.createElement('table');
@@ -213,13 +469,13 @@
         for (const r of conf.results) {
           const tr = document.createElement('tr');
           const td1 = document.createElement('td');
-          td1.textContent = r.suite || r.profile || r.name || '—';
+          td1.textContent = r.suite || r.profile || r.name || '\u2014';
           const td2 = document.createElement('td');
-          td2.textContent = r.description || '—';
+          td2.textContent = r.description || '\u2014';
           const td3 = document.createElement('td');
           const rPassed = r.checks_passed ?? 0;
           const rTotal = r.checks_total ?? 0;
-          td3.textContent = rTotal > 0 ? `${rPassed}/${rTotal}` : '—';
+          td3.textContent = rTotal > 0 ? `${rPassed}/${rTotal}` : '\u2014';
           const td4 = document.createElement('td');
           const badge = document.createElement('span');
           if (rTotal === 0) {
@@ -266,20 +522,20 @@
       if (benchmarks.scenarios?.metrics) {
         const m = benchmarks.scenarios.metrics;
         const dur = m.http_req_duration?.values;
-        grid.appendChild(metricBox('HTTP Req Duration (p95)', dur?.['p(95)'] != null ? `${dur['p(95)'].toFixed(1)} ms` : '—'));
-        grid.appendChild(metricBox('HTTP Req Duration (med)', dur?.med != null ? `${dur.med.toFixed(1)} ms` : '—'));
-        grid.appendChild(metricBox('Requests/sec', m.http_reqs?.values?.rate != null ? m.http_reqs.values.rate.toFixed(2) : '—'));
+        grid.appendChild(metricBox('HTTP Req Duration (p95)', dur?.['p(95)'] != null ? `${dur['p(95)'].toFixed(1)} ms` : '\u2014'));
+        grid.appendChild(metricBox('HTTP Req Duration (med)', dur?.med != null ? `${dur.med.toFixed(1)} ms` : '\u2014'));
+        grid.appendChild(metricBox('Requests/sec', m.http_reqs?.values?.rate != null ? m.http_reqs.values.rate.toFixed(2) : '\u2014'));
         const checks = m.checks?.values;
-        const checkRate = checks ? `${checks.passes ?? 0}/${(checks.passes ?? 0) + (checks.fails ?? 0)}` : '—';
+        const checkRate = checks ? `${checks.passes ?? 0}/${(checks.passes ?? 0) + (checks.fails ?? 0)}` : '\u2014';
         grid.appendChild(metricBox('Checks Passed', checkRate));
       }
 
       if (benchmarks.crud?.metrics) {
         const m = benchmarks.crud.metrics;
         const dur = m.http_req_duration?.values;
-        grid.appendChild(metricBox('CRUD Duration (p95)', dur?.['p(95)'] != null ? `${dur['p(95)'].toFixed(1)} ms` : '—'));
-        grid.appendChild(metricBox('CRUD Duration (med)', dur?.med != null ? `${dur.med.toFixed(1)} ms` : '—'));
-        grid.appendChild(metricBox('CRUD Requests/sec', m.http_reqs?.values?.rate != null ? m.http_reqs.values.rate.toFixed(2) : '—'));
+        grid.appendChild(metricBox('CRUD Duration (p95)', dur?.['p(95)'] != null ? `${dur['p(95)'].toFixed(1)} ms` : '\u2014'));
+        grid.appendChild(metricBox('CRUD Duration (med)', dur?.med != null ? `${dur.med.toFixed(1)} ms` : '\u2014'));
+        grid.appendChild(metricBox('CRUD Requests/sec', m.http_reqs?.values?.rate != null ? m.http_reqs.values.rate.toFixed(2) : '\u2014'));
       }
 
       section.appendChild(grid);
@@ -299,10 +555,10 @@
       const table = document.createElement('table');
       const tbody = document.createElement('tbody');
       const rows = [
-        ['CPU', `${env.cpu_count || '—'} cores`],
-        ['Memory', `${env.total_memory_mb || '—'} MB`],
-        ['Docker', env.docker_version || '—'],
-        ['OS / Arch', `${env.os || '—'} / ${env.arch || '—'}`],
+        ['CPU', `${env.cpu_count || '\u2014'} cores`],
+        ['Memory', `${env.total_memory_mb || '\u2014'} MB`],
+        ['Docker', env.docker_version || '\u2014'],
+        ['OS / Arch', `${env.os || '\u2014'} / ${env.arch || '\u2014'}`],
       ];
       for (const [label, value] of rows) {
         const tr = document.createElement('tr');
@@ -318,33 +574,26 @@
       return section;
     }
 
-    function render(data) {
-      app.replaceChildren();
-
-      const ts = document.createElement('p');
-      ts.className = 'timestamp';
-      ts.textContent = `Last updated: ${new Date(data.generated_at).toLocaleString()}`;
-      app.appendChild(ts);
-
-      if (!data.sdks || data.sdks.length === 0) {
+    function renderServerTab(container, serverResults) {
+      if (!serverResults || serverResults.length === 0) {
         const empty = document.createElement('div');
-        empty.className = 'loading';
-        empty.textContent = 'No SDK results available yet.';
-        app.appendChild(empty);
+        empty.className = 'empty-state';
+        empty.textContent = 'No server benchmark results available yet.';
+        container.appendChild(empty);
         return;
       }
 
-      for (const sdk of data.sdks) {
+      for (const srv of serverResults) {
         const card = document.createElement('div');
         card.className = 'sdk-card';
 
         const header = document.createElement('div');
         header.className = 'sdk-header';
         const h2 = document.createElement('h2');
-        h2.textContent = sdk.name || sdk.id;
+        h2.textContent = srv.name || srv.id;
         header.appendChild(h2);
 
-        const confStatus = getConformanceStatus(sdk.conformance);
+        const confStatus = getConformanceStatus(srv.conformance);
         const badge = document.createElement('span');
         badge.className = `badge badge-${confStatus.cls}`;
         badge.textContent = confStatus.label;
@@ -354,18 +603,70 @@
         const body = document.createElement('div');
         body.className = 'sdk-body';
 
-        const confSection = buildConformanceSection(sdk.conformance);
+        const confSection = buildConformanceSection(srv.conformance);
         if (confSection) body.appendChild(confSection);
 
-        const benchSection = buildBenchmarksSection(sdk.benchmarks);
+        const benchSection = buildBenchmarksSection(srv.benchmarks);
         if (benchSection) body.appendChild(benchSection);
 
-        const envSection = buildEnvSection(sdk.env);
+        const envSection = buildEnvSection(srv.env);
         if (envSection) body.appendChild(envSection);
 
         card.appendChild(body);
-        app.appendChild(card);
+        container.appendChild(card);
       }
+    }
+
+    // ── Main render ────────────────────────────────────────
+    function render(data) {
+      app.replaceChildren();
+
+      const ts = document.createElement('p');
+      ts.className = 'timestamp';
+      ts.textContent = `Last updated: ${new Date(data.generated_at).toLocaleString()}`;
+      app.appendChild(ts);
+
+      // Backward compat: if old format (data.sdks), treat as server_benchmarks
+      const sdkResults = data.sdk_benchmarks || [];
+      const serverResults = data.server_benchmarks || data.sdks || [];
+
+      const tabBar = document.createElement('div');
+      tabBar.className = 'tab-bar';
+
+      const sdkBtn = document.createElement('button');
+      sdkBtn.className = 'tab-btn active';
+      sdkBtn.textContent = 'SDK Pipeline Benchmarks';
+      sdkBtn.dataset.tab = 'tab-sdk';
+
+      const srvBtn = document.createElement('button');
+      srvBtn.className = 'tab-btn';
+      srvBtn.textContent = 'Server API Benchmarks';
+      srvBtn.dataset.tab = 'tab-server';
+
+      tabBar.append(sdkBtn, srvBtn);
+      app.appendChild(tabBar);
+
+      const sdkTab = document.createElement('div');
+      sdkTab.id = 'tab-sdk';
+      sdkTab.className = 'tab-content active';
+      renderSdkTab(sdkTab, sdkResults);
+      app.appendChild(sdkTab);
+
+      const srvTab = document.createElement('div');
+      srvTab.id = 'tab-server';
+      srvTab.className = 'tab-content';
+      renderServerTab(srvTab, serverResults);
+      app.appendChild(srvTab);
+
+      // If no SDK results, default to server tab
+      if (sdkResults.length === 0 && serverResults.length > 0) {
+        sdkBtn.classList.remove('active');
+        srvBtn.classList.add('active');
+        sdkTab.classList.remove('active');
+        srvTab.classList.add('active');
+      }
+
+      setupTabs();
     }
 
     async function loadResults() {

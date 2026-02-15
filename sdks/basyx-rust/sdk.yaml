@@ -1,0 +1,10 @@
+id: basyx-rust
+name: "BaSyx Rust SDK"
+language: rust
+operations:
+  - deserialize
+  - serialize
+datasets:
+  - wide
+  - deep
+  - mixed
