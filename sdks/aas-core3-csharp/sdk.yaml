@@ -1,0 +1,13 @@
+id: aas-core3-csharp
+name: aas-core3.0 C#
+language: csharp
+operations:
+  - deserialize
+  - validate
+  - traverse
+  - update
+  - serialize
+datasets:
+  - wide
+  - deep
+  - mixed

@@ -1,20 +1,60 @@
-[
-  {
-    "id": "basyx-java",
-    "name": "Eclipse BaSyx Java v2",
-    "kind": "aas-environment",
-    "repo": "eclipse-basyx/basyx-java-server-sdk",
-    "docker_image": "eclipsebasyx/aas-environment",
-    "adapter_dir": "sdks/basyx-java",
-    "enabled": true
-  },
-  {
-    "id": "faaast-service",
-    "name": "FA³ST Service",
-    "kind": "aas-environment",
-    "repo": "FraunhoferIOSB/FAAAST-Service",
-    "docker_image": "fraunhoferiosb/faaast-service",
-    "adapter_dir": "sdks/faaast-service",
-    "enabled": true
-  }
-]
+{
+  "sdk_benchmarks": [
+    {
+      "id": "aas-core3-python",
+      "name": "aas-core3.0 Python",
+      "language": "python",
+      "repo": "aas-core-works/aas-core3.0-python",
+      "package": "aas-core3.0",
+      "adapter_dir": "sdks/aas-core3-python",
+      "enabled": true
+    },
+    {
+      "id": "aas-core3-golang",
+      "name": "aas-core3.0 Go",
+      "language": "go",
+      "repo": "aas-core-works/aas-core3.0-golang",
+      "package": "github.com/aas-core-works/aas-core3.0-golang",
+      "adapter_dir": "sdks/aas-core3-golang",
+      "enabled": true
+    },
+    {
+      "id": "aas-core3-csharp",
+      "name": "aas-core3.0 C#",
+      "language": "csharp",
+      "repo": "aas-core-works/aas-core3.0-csharp",
+      "package": "AasCore.Aas3_0",
+      "adapter_dir": "sdks/aas-core3-csharp",
+      "enabled": true
+    },
+    {
+      "id": "aas-core3-typescript",
+      "name": "aas-core3.0 TypeScript",
+      "language": "typescript",
+      "repo": "aas-core-works/aas-core3.0-typescript",
+      "package": "@aas-core-works/aas-core3.0-typescript",
+      "adapter_dir": "sdks/aas-core3-typescript",
+      "enabled": true
+    }
+  ],
+  "server_benchmarks": [
+    {
+      "id": "basyx-java",
+      "name": "Eclipse BaSyx Java v2",
+      "kind": "aas-environment",
+      "repo": "eclipse-basyx/basyx-java-server-sdk",
+      "docker_image": "eclipsebasyx/aas-environment",
+      "adapter_dir": "servers/basyx-java",
+      "enabled": true
+    },
+    {
+      "id": "faaast-service",
+      "name": "FA³ST Service",
+      "kind": "aas-environment",
+      "repo": "FraunhoferIOSB/FAAAST-Service",
+      "docker_image": "fraunhoferiosb/faaast-service",
+      "adapter_dir": "servers/faaast-service",
+      "enabled": true
+    }
+  ]
+}

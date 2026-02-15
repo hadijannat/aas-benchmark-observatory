@@ -19,32 +19,95 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ── Job 1: Build the matrix from known-sdks.json ──────────────
+  # ── Job 1: Build matrices from known-sdks.json ────────────────
   matrix:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set.outputs.matrix }}
+      sdk_matrix: ${{ steps.set.outputs.sdk_matrix }}
+      server_matrix: ${{ steps.set.outputs.server_matrix }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate matrix
+      - name: Generate matrices
         id: set
         env:
           SDK_FILTER: ${{ github.event.inputs.sdk_filter }}
         run: |
-          MATRIX=$(bash scripts/set-matrix.sh)
+          SDK_MATRIX=$(bash scripts/set-matrix.sh sdk)
           if [ -n "$SDK_FILTER" ]; then
-            MATRIX=$(echo "$MATRIX" | jq -c --arg id "$SDK_FILTER" \
+            SDK_MATRIX=$(echo "$SDK_MATRIX" | jq -c --arg id "$SDK_FILTER" \
               '{include: [.include[] | select(.id == $id)]}')
           fi
-          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "sdk_matrix=$SDK_MATRIX" >> "$GITHUB_OUTPUT"
 
-  # ── Job 2: Benchmark each SDK ─────────────────────────────────
-  benchmark:
+          SERVER_MATRIX=$(bash scripts/set-matrix.sh server)
+          if [ -n "$SDK_FILTER" ]; then
+            SERVER_MATRIX=$(echo "$SERVER_MATRIX" | jq -c --arg id "$SDK_FILTER" \
+              '{include: [.include[] | select(.id == $id)]}')
+          fi
+          echo "server_matrix=$SERVER_MATRIX" >> "$GITHUB_OUTPUT"
+
+  # ── Job 2a: Benchmark each SDK library ───────────────────────
+  sdk-benchmark:
     needs: matrix
     runs-on: ubuntu-latest
     strategy:
-      matrix: ${{ fromJSON(needs.matrix.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.matrix.outputs.sdk_matrix) }}
+      max-parallel: 2
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare output directory
+        run: mkdir -p results/${{ matrix.id }}
+
+      - name: Collect environment metadata
+        run: bash harness/collect-env.sh > results/${{ matrix.id }}/env.json
+
+      - name: Generate datasets
+        run: python3 datasets/generate.py --output-dir datasets/generated
+
+      - name: Set up Python
+        if: matrix.language == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Set up .NET
+        if: matrix.language == 'csharp'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0"
+
+      - name: Set up Node.js
+        if: matrix.language == 'typescript'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run benchmarks
+        run: bash ${{ matrix.adapter_dir }}/run-benchmarks.sh datasets/generated results/${{ matrix.id }}
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.id }}
+          path: results/${{ matrix.id }}/
+
+  # ── Job 2b: Benchmark each AAS server ───────────────────────
+  server-benchmark:
+    needs: matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJSON(needs.matrix.outputs.server_matrix) }}
       max-parallel: 1
       fail-fast: false
 
@@ -124,9 +187,9 @@ jobs:
           name: results-${{ matrix.id }}
           path: results/${{ matrix.id }}/
 
-  # ── Job 3: Aggregate & deploy to Pages ─────────────────────────
+  # ── Job 3: Aggregate & deploy to Pages ───────────────────────
   deploy:
-    needs: benchmark
+    needs: [sdk-benchmark, server-benchmark]
     if: always()
     runs-on: ubuntu-latest
     environment:

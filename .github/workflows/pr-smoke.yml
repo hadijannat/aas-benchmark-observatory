@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - "servers/**"
       - "sdks/**"
       - "harness/**"
       - "known-sdks.json"
@@ -12,42 +13,68 @@ jobs:
   detect:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.changed.outputs.matrix }}
+      server_matrix: ${{ steps.changed.outputs.server_matrix }}
+      sdk_matrix: ${{ steps.changed.outputs.sdk_matrix }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Detect changed SDKs
+      - name: Detect changed adapters
         id: changed
         run: |
-          CHANGED_DIRS=$(git diff --name-only origin/main...HEAD -- sdks/ \
+          # Detect changed server adapters
+          SERVER_DIRS=$(git diff --name-only origin/main...HEAD -- servers/ \
             | cut -d/ -f1-2 \
             | sort -u)
 
-          if [ -z "$CHANGED_DIRS" ]; then
-            # If no SDK dirs changed directly, test all enabled SDKs
-            MATRIX=$(bash scripts/set-matrix.sh)
+          if [ -z "$SERVER_DIRS" ]; then
+            # If harness or known-sdks.json changed, test all servers
+            if git diff --name-only origin/main...HEAD | grep -qE '^(harness/|known-sdks.json)'; then
+              SERVER_MATRIX=$(bash scripts/set-matrix.sh server)
+            else
+              SERVER_MATRIX='{"include":[]}'
+            fi
           else
             INCLUDES="[]"
-            for dir in $CHANGED_DIRS; do
-              SDK_ID=$(basename "$dir")
-              if jq -e --arg id "$SDK_ID" '.[] | select(.id == $id and .enabled == true)' known-sdks.json > /dev/null 2>&1; then
-                INCLUDES=$(echo "$INCLUDES" | jq -c --arg id "$SDK_ID" --arg dir "$dir" \
+            for dir in $SERVER_DIRS; do
+              SERVER_ID=$(basename "$dir")
+              if jq -e --arg id "$SERVER_ID" '.server_benchmarks[] | select(.id == $id and .enabled == true)' known-sdks.json > /dev/null 2>&1; then
+                INCLUDES=$(echo "$INCLUDES" | jq -c --arg id "$SERVER_ID" --arg dir "$dir" \
                   '. + [{"id": $id, "adapter_dir": $dir}]')
               fi
             done
-            MATRIX=$(echo "$INCLUDES" | jq -c '{include: .}')
+            SERVER_MATRIX=$(echo "$INCLUDES" | jq -c '{include: .}')
           fi
+          echo "server_matrix=$SERVER_MATRIX" >> "$GITHUB_OUTPUT"
 
-          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          # Detect changed SDK adapters
+          SDK_DIRS=$(git diff --name-only origin/main...HEAD -- sdks/ \
+            | cut -d/ -f1-2 \
+            | sort -u)
 
-  smoke:
+          if [ -n "$SDK_DIRS" ]; then
+            INCLUDES="[]"
+            for dir in $SDK_DIRS; do
+              SDK_ID=$(basename "$dir")
+              if jq -e --arg id "$SDK_ID" '.sdk_benchmarks[] | select(.id == $id and .enabled == true)' known-sdks.json > /dev/null 2>&1; then
+                LANG=$(jq -r --arg id "$SDK_ID" '.sdk_benchmarks[] | select(.id == $id) | .language' known-sdks.json)
+                INCLUDES=$(echo "$INCLUDES" | jq -c --arg id "$SDK_ID" --arg dir "$dir" --arg lang "$LANG" \
+                  '. + [{"id": $id, "adapter_dir": $dir, "language": $lang}]')
+              fi
+            done
+            SDK_MATRIX=$(echo "$INCLUDES" | jq -c '{include: .}')
+          else
+            SDK_MATRIX='{"include":[]}'
+          fi
+          echo "sdk_matrix=$SDK_MATRIX" >> "$GITHUB_OUTPUT"
+
+  server-smoke:
     needs: detect
-    if: fromJSON(needs.detect.outputs.matrix).include[0] != null
+    if: fromJSON(needs.detect.outputs.server_matrix).include[0] != null
     runs-on: ubuntu-latest
     strategy:
-      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.detect.outputs.server_matrix) }}
       fail-fast: true
 
     steps:
@@ -105,3 +132,44 @@ jobs:
         if: always()
         working-directory: ${{ matrix.adapter_dir }}
         run: docker compose down -v
+
+  sdk-smoke:
+    needs: detect
+    if: fromJSON(needs.detect.outputs.sdk_matrix).include[0] != null
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJSON(needs.detect.outputs.sdk_matrix) }}
+      fail-fast: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        if: matrix.language == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Setup .NET
+        if: matrix.language == 'csharp'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0"
+
+      - name: Setup Node.js
+        if: matrix.language == 'typescript'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Generate datasets (mixed only for smoke)
+        run: python3 datasets/generate.py --output-dir datasets/generated --only mixed
+
+      - name: Run SDK benchmarks
+        run: bash ${{ matrix.adapter_dir }}/run-benchmarks.sh datasets/generated results/${{ matrix.id }}

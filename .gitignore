@@ -35,5 +35,9 @@ Thumbs.db
 # Worktrees
 .worktrees/
 
+# Generated datasets
+datasets/*.json
+datasets/generated/
+
 # Claude Code
 CLAUDE.md

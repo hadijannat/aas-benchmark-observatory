@@ -1,0 +1,13 @@
+id: aas-core3-typescript
+name: aas-core3.0 TypeScript
+language: typescript
+operations:
+  - deserialize
+  - validate
+  - traverse
+  - update
+  - serialize
+datasets:
+  - wide
+  - deep
+  - mixed

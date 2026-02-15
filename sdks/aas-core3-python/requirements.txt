@@ -1,0 +1,4 @@
+aas-core3.0
+pytest
+pytest-benchmark
+psutil

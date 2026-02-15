@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check Docker Hub for new SDK image tags and open GitHub issues."""
+"""Check Docker Hub for new server image tags and open GitHub issues."""
 
 import argparse
 import json
@@ -16,9 +16,10 @@ DOCKER_HUB_TAGS_URL = (
 )
 
 
-def load_sdks():
+def load_servers():
     with open(KNOWN_SDKS) as f:
-        return json.load(f)
+        data = json.load(f)
+    return data.get("server_benchmarks", [])
 
 
 def fetch_latest_tags(image: str) -> list[str]:
@@ -54,14 +55,14 @@ def main():
     )
     args = parser.parse_args()
 
-    sdks = load_sdks()
+    servers = load_servers()
     open_titles = existing_issue_titles()
 
-    for sdk in sdks:
-        if not sdk.get("enabled"):
+    for server in servers:
+        if not server.get("enabled"):
             continue
-        image = sdk["docker_image"]
-        name = sdk["name"]
+        image = server["docker_image"]
+        name = server["name"]
         print(f"Checking {name} ({image})...")
 
         tags = fetch_latest_tags(image)
@@ -69,7 +70,7 @@ def main():
             continue
 
         for tag in tags:
-            title = f"[SDK Update] {name} \u2014 new tag: {tag}"
+            title = f"[Server Update] {name} \u2014 new tag: {tag}"
             if title in open_titles:
                 continue
 
@@ -83,7 +84,7 @@ def main():
                      f"Please review and update the adapter if needed."],
                     check=True,
                 )
-            # Only open an issue for the most recent new tag per SDK
+            # Only open an issue for the most recent new tag per server
             break
 
 

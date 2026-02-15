@@ -1,0 +1,13 @@
+id: aas-core3-python
+name: aas-core3.0 Python
+language: python
+operations:
+  - deserialize
+  - validate
+  - traverse
+  - update
+  - serialize
+datasets:
+  - wide
+  - deep
+  - mixed
