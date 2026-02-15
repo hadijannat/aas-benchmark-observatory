@@ -77,6 +77,11 @@ jobs:
         working-directory: ${{ matrix.adapter_dir }}
         run: docker compose logs --no-color
 
+      - name: Seed test data
+        run: |
+          API_BASE=$(yq '.api_base_url' ${{ matrix.adapter_dir }}/sdk.yaml)
+          bash harness/seed-test-data.sh "$API_BASE"
+
       - name: Run conformance tests
         run: |
           mkdir -p results/${{ matrix.id }}
