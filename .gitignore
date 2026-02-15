@@ -32,5 +32,8 @@ Thumbs.db
 .env
 .env.local
 
+# Worktrees
+.worktrees/
+
 # Claude Code
 CLAUDE.md
