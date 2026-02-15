@@ -1,12 +1,10 @@
 package com.aas.benchmark;
 
 import aas_core.aas3_0.jsonization.Jsonization;
-import aas_core.aas3_0.types.enums.DataTypeDefXsd;
-import aas_core.aas3_0.types.impl.Property;
-import aas_core.aas3_0.types.interfaces.IClass;
-import aas_core.aas3_0.types.interfaces.IEnvironment;
-import aas_core.aas3_0.types.interfaces.IProperty;
-import aas_core.aas3_0.verification.Reporting;
+import aas_core.aas3_0.reporting.Reporting;
+import aas_core.aas3_0.types.model.IClass;
+import aas_core.aas3_0.types.model.IEnvironment;
+import aas_core.aas3_0.types.model.IProperty;
 import aas_core.aas3_0.verification.Verification;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
