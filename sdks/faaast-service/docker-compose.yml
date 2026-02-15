@@ -4,10 +4,14 @@ services:
     ports:
       - "8080:443"
     volumes:
-      - ./faaast-config.json:/app/config.json
-      - ./model.json:/app/model.json
+      - ./faaast-config.json:/app/resources/config.json
+      - ./model.json:/app/resources/model.json
+    environment:
+      faaast_config: /app/resources/config.json
+      faaast_model: /app/resources/model.json
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:443/api/v3.0/shells"]
+      test: ["CMD-SHELL", "wget --no-check-certificate -qO- http://localhost:443/api/v3.0/shells || exit 1"]
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout: 10s
+      retries: 12
+      start_period: 30s

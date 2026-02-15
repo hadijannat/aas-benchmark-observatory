@@ -18,13 +18,18 @@ FAILED=0
 RESULTS="["
 
 for (( i=0; i<PROFILE_COUNT; i++ )); do
-  PROFILE_NAME="$(yq -r ".conformance.profiles[$i].name" "$SDK_YAML")"
+  SUITE="$(yq -r ".conformance.profiles[$i].suite" "$SDK_YAML")"
   PROFILE_DESC="$(yq -r ".conformance.profiles[$i].description" "$SDK_YAML")"
   OUTFILE="$OUTPUT_DIR/conformance_${i}.json"
 
-  printf "Running conformance test %d/%d: %s (%s)\n" "$((i+1))" "$PROFILE_COUNT" "$PROFILE_NAME" "$PROFILE_DESC"
+  printf "Running conformance test %d/%d: %s (%s)\n" "$((i+1))" "$PROFILE_COUNT" "$SUITE" "$PROFILE_DESC"
 
-  if aas_test_engines check_server --server "$API_BASE_URL" --output "$OUTFILE" 2>&1; then
+  # aas_test_engines: positional args are <server> <suite>
+  # --output selects format (OutputFormats.JSON), result goes to stdout
+  if aas_test_engines check_server \
+      --output OutputFormats.JSON \
+      "$API_BASE_URL" "$SUITE" \
+      > "$OUTFILE" 2>&1; then
     STATUS="pass"
     PASSED=$((PASSED + 1))
   else
@@ -35,7 +40,7 @@ for (( i=0; i<PROFILE_COUNT; i++ )); do
   if [ "$i" -gt 0 ]; then
     RESULTS="${RESULTS},"
   fi
-  RESULTS="${RESULTS}{\"index\":${i},\"profile\":\"${PROFILE_NAME}\",\"description\":\"${PROFILE_DESC}\",\"status\":\"${STATUS}\",\"output_file\":\"conformance_${i}.json\"}"
+  RESULTS="${RESULTS}{\"index\":${i},\"suite\":\"${SUITE}\",\"description\":\"${PROFILE_DESC}\",\"passed\":$([ "$STATUS" = "pass" ] && echo true || echo false),\"output_file\":\"conformance_${i}.json\"}"
 done
 
 RESULTS="${RESULTS}]"

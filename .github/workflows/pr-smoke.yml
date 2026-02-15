@@ -65,12 +65,17 @@ jobs:
 
       - name: Start services
         working-directory: ${{ matrix.adapter_dir }}
-        run: docker compose up -d
+        run: docker compose up -d --wait --wait-timeout 180
 
       - name: Wait for health
         run: |
           HEALTH_URL=$(yq '.health.url' ${{ matrix.adapter_dir }}/sdk.yaml)
-          bash harness/wait-for-health.sh "$HEALTH_URL" 120
+          bash harness/wait-for-health.sh "$HEALTH_URL" 180
+
+      - name: Dump container logs on failure
+        if: failure()
+        working-directory: ${{ matrix.adapter_dir }}
+        run: docker compose logs --no-color
 
       - name: Run conformance tests
         run: |

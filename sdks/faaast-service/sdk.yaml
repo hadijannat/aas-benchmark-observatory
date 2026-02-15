@@ -8,9 +8,7 @@ health:
   expect_status: 200
 conformance:
   profiles:
-    - name: SSP-002
+    - suite: "https://admin-shell.io/aas/API/3/0/AssetAdministrationShellRepositoryServiceSpecification/SSP-002"
       description: "AAS Repository Service"
-      endpoint: /api/v3.0
-    - name: SSP-002
+    - suite: "https://admin-shell.io/aas/API/3/0/SubmodelRepositoryServiceSpecification/SSP-002"
       description: "Submodel Repository Service"
-      endpoint: /api/v3.0
