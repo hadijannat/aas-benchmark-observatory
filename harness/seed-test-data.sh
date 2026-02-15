@@ -8,44 +8,51 @@ API_BASE="${1:?Usage: seed-test-data.sh <api_base_url>}"
 
 echo "Seeding test data at $API_BASE ..."
 
-# Create a minimal submodel first (shell references it)
-SUBMODEL_ID="urn:example:submodel:test-1"
-curl -sf -X POST "$API_BASE/api/v3.0/submodels" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "'"$SUBMODEL_ID"'",
-    "idShort": "TestSubmodel",
-    "modelType": "Submodel",
-    "submodelElements": []
-  }' > /dev/null
+post_json() {
+  local url="$1"
+  local data="$2"
+  local description="$3"
 
-echo "  Created submodel: $SUBMODEL_ID"
+  HTTP_CODE=$(curl -s -o /tmp/seed-response.txt -w '%{http_code}' \
+    -X POST "$url" \
+    -H "Content-Type: application/json" \
+    -d "$data")
 
-# Create a minimal AAS shell referencing the submodel
-SHELL_ID="urn:example:aas:test-1"
-SUBMODEL_ID_B64=$(printf '%s' "$SUBMODEL_ID" | base64 -w0 2>/dev/null || printf '%s' "$SUBMODEL_ID" | base64)
-curl -sf -X POST "$API_BASE/api/v3.0/shells" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "'"$SHELL_ID"'",
-    "idShort": "TestShell",
-    "modelType": "AssetAdministrationShell",
-    "assetInformation": {
-      "assetKind": "Instance",
-      "globalAssetId": "urn:example:asset:test-1"
-    },
-    "submodels": [
-      {
-        "type": "ModelReference",
-        "keys": [
-          {
-            "type": "Submodel",
-            "value": "'"$SUBMODEL_ID"'"
-          }
-        ]
-      }
-    ]
-  }' > /dev/null
+  if [[ "$HTTP_CODE" -ge 200 && "$HTTP_CODE" -lt 300 ]]; then
+    echo "  Created $description (HTTP $HTTP_CODE)"
+  else
+    echo "  FAILED to create $description (HTTP $HTTP_CODE):" >&2
+    cat /tmp/seed-response.txt >&2
+    echo >&2
+    return 1
+  fi
+}
 
-echo "  Created shell: $SHELL_ID"
+# Create a minimal submodel (AAS v3.0 JSON serialization format)
+post_json "$API_BASE/api/v3.0/submodels" '{
+  "id": "urn:example:submodel:test-1",
+  "idShort": "TestSubmodel"
+}' "submodel urn:example:submodel:test-1"
+
+# Create a minimal AAS shell
+post_json "$API_BASE/api/v3.0/shells" '{
+  "id": "urn:example:aas:test-1",
+  "idShort": "TestShell",
+  "assetInformation": {
+    "assetKind": "Instance",
+    "globalAssetId": "urn:example:asset:test-1"
+  },
+  "submodels": [
+    {
+      "type": "ModelReference",
+      "keys": [
+        {
+          "type": "Submodel",
+          "value": "urn:example:submodel:test-1"
+        }
+      ]
+    }
+  ]
+}' "shell urn:example:aas:test-1"
+
 echo "Seeding complete."
