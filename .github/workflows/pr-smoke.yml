@@ -139,7 +139,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix: ${{ fromJSON(needs.detect.outputs.sdk_matrix) }}
-      fail-fast: true
+      fail-fast: false
 
     steps:
       - uses: actions/checkout@v4

@@ -13,7 +13,7 @@ export DATASETS_DIR
 cd "$SCRIPT_DIR"
 
 # Install dependencies
-npm ci
+npm install
 
 # Run benchmarks via tsx, outputs JSON to stdout
 npx tsx bench_pipeline.ts > bench_raw.json
