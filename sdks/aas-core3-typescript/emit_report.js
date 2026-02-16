@@ -57,13 +57,21 @@ function main() {
 
     const memoryEntry = {
       peak_rss_bytes: null,
+      heap_used_bytes: null,
       alloc_bytes_per_op: null,
       alloc_count_per_op: null,
+      gc_pause_ms: null,
+      gc_count: null,
+      traced_peak_bytes: null,
     };
 
     if (result.memory) {
       memoryEntry.peak_rss_bytes =
         result.memory.peakRssBytes > 0 ? result.memory.peakRssBytes : null;
+      memoryEntry.heap_used_bytes =
+        result.memory.heapUsedBytes != null && result.memory.heapUsedBytes !== 0
+          ? result.memory.heapUsedBytes
+          : null;
     }
 
     datasets[dsName].operations[result.operation] = {
@@ -102,7 +110,7 @@ function main() {
   }
 
   const report = {
-    schema_version: 1,
+    schema_version: 2,
     sdk_id: "aas-core3-typescript",
     metadata: {
       language: "typescript",

@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Convert BenchmarkDotNet JSON export to report.json.
+"""Convert BenchmarkDotNet JSON export to report.json (schema v2).
 
 Usage:
     python3 emit_report.py <benchmarkdotnet_json> <output_path>
+
+Schema v2 additions:
+  - memory.heap_used_bytes, gc_pause_ms, gc_count, traced_peak_bytes
+  - gc_count derived from Gen0Collections + Gen1Collections + Gen2Collections
 """
 
 import argparse
-import datetime
 import json
 import sys
+from datetime import datetime, timezone
 
 
 # Map BenchmarkDotNet method names to our operation names
@@ -69,11 +73,19 @@ def build_operation_entry(benchmark):
     memory = benchmark.get("Memory", {})
     alloc_bytes = memory.get("BytesAllocatedPerOperation")
     gen0 = memory.get("Gen0Collections")
+    gen1 = memory.get("Gen1Collections")
+    gen2 = memory.get("Gen2Collections")
 
     # Convert Gen0Collections to alloc_count_per_op if available
     alloc_count = None
     if gen0 is not None:
         alloc_count = int(gen0)
+
+    # Sum all GC generation collections for gc_count
+    gc_count = None
+    gc_parts = [v for v in (gen0, gen1, gen2) if v is not None]
+    if gc_parts:
+        gc_count = sum(int(v) for v in gc_parts)
 
     return {
         "iterations": iterations,
@@ -89,6 +101,10 @@ def build_operation_entry(benchmark):
             "peak_rss_bytes": None,
             "alloc_bytes_per_op": int(alloc_bytes) if alloc_bytes is not None else None,
             "alloc_count_per_op": alloc_count,
+            "heap_used_bytes": None,
+            "gc_pause_ms": None,
+            "gc_count": gc_count,
+            "traced_peak_bytes": None,
         },
     }
 
@@ -131,14 +147,14 @@ def main():
         datasets[dataset]["operations"][operation] = op_entry
 
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "sdk_id": "aas-core3-csharp",
         "metadata": {
             "language": "csharp",
             "runtime_version": f".NET {runtime_version}",
             "sdk_package_version": "latest",
             "benchmark_harness": "BenchmarkDotNet",
-            "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         },
         "datasets": datasets,
     }

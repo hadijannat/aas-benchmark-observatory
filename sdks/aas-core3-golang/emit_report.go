@@ -2,7 +2,7 @@
 //
 // Usage:
 //
-//	go run emit_report.go <bench_raw.json> <output_path>
+//	go run emit_report.go <bench_raw.json> <output_path> [memory_stats.json]
 package main
 
 import (
@@ -41,9 +41,13 @@ type BenchResult struct {
 
 // MemoryEntry holds memory metrics for report output.
 type MemoryEntry struct {
-	PeakRSSBytes     *int64 `json:"peak_rss_bytes"`
-	AllocBytesPerOp  *int64 `json:"alloc_bytes_per_op"`
-	AllocCountPerOp  *int64 `json:"alloc_count_per_op"`
+	PeakRSSBytes     *int64   `json:"peak_rss_bytes"`
+	AllocBytesPerOp  *int64   `json:"alloc_bytes_per_op"`
+	AllocCountPerOp  *int64   `json:"alloc_count_per_op"`
+	HeapUsedBytes    *int64   `json:"heap_used_bytes"`
+	GcPauseMs        *float64 `json:"gc_pause_ms"`
+	GcCount          *int64   `json:"gc_count"`
+	TracedPeakBytes  *int64   `json:"traced_peak_bytes"`
 }
 
 // OperationEntry is one operation in the report.
@@ -73,6 +77,22 @@ type Report struct {
 	SDKID         string                   `json:"sdk_id"`
 	Metadata      map[string]string        `json:"metadata"`
 	Datasets      map[string]DatasetEntry  `json:"datasets"`
+}
+
+// sideChannelMemSnapshot mirrors the snapshot struct written by bench_pipeline_test.go.
+type sideChannelMemSnapshot struct {
+	HeapAllocBytes  uint64 `json:"heap_alloc_bytes"`
+	HeapSysBytes    uint64 `json:"heap_sys_bytes"`
+	TotalAllocBytes uint64 `json:"total_alloc_bytes"`
+	NumGC           uint32 `json:"num_gc"`
+	PauseTotalNs    uint64 `json:"pause_total_ns"`
+}
+
+// sideChannelMemStats is the schema of the memory_stats.json file.
+type sideChannelMemStats struct {
+	Before sideChannelMemSnapshot            `json:"before"`
+	After  sideChannelMemSnapshot            `json:"after"`
+	Groups map[string]sideChannelMemSnapshot `json:"groups"`
 }
 
 // benchLineRegex matches Go benchmark output lines like:
@@ -143,6 +163,19 @@ func parseBenchResults(path string) (map[string]*BenchResult, error) {
 	return results, scanner.Err()
 }
 
+// loadMemoryStats reads the side-channel memory_stats.json file if it exists.
+func loadMemoryStats(path string) (*sideChannelMemStats, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var stats sideChannelMemStats
+	if err := json.Unmarshal(data, &stats); err != nil {
+		return nil, fmt.Errorf("parse memory_stats.json: %w", err)
+	}
+	return &stats, nil
+}
+
 func computeStats(runs []float64) (mean, median, stddev, min, max float64) {
 	if len(runs) == 0 {
 		return
@@ -191,13 +224,26 @@ func computeStats(runs []float64) (mean, median, stddev, min, max float64) {
 }
 
 func main() {
-	if len(os.Args) != 3 {
-		fmt.Fprintf(os.Stderr, "Usage: go run emit_report.go <bench_raw.json> <output_path>\n")
+	if len(os.Args) < 3 || len(os.Args) > 4 {
+		fmt.Fprintf(os.Stderr, "Usage: go run emit_report.go <bench_raw.json> <output_path> [memory_stats.json]\n")
 		os.Exit(1)
 	}
 
 	inputPath := os.Args[1]
 	outputPath := os.Args[2]
+
+	// Optionally load side-channel memory stats
+	var memStats *sideChannelMemStats
+	if len(os.Args) == 4 {
+		memStatsPath := os.Args[3]
+		ms, err := loadMemoryStats(memStatsPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not load memory stats from %s: %v\n", memStatsPath, err)
+		} else {
+			memStats = ms
+			fmt.Fprintf(os.Stderr, "Loaded memory stats from %s\n", memStatsPath)
+		}
+	}
 
 	results, err := parseBenchResults(inputPath)
 	if err != nil {
@@ -225,6 +271,37 @@ func main() {
 		bytesPerOp := r.BytesPerOp
 		allocsPerOp := r.AllocsPerOp
 
+		mem := MemoryEntry{
+			AllocBytesPerOp: &bytesPerOp,
+			AllocCountPerOp: &allocsPerOp,
+		}
+
+		// Populate heap/GC data from side-channel memory stats if available
+		if memStats != nil {
+			// Look up the group snapshot for this operation
+			if groupSnap, ok := memStats.Groups[r.Operation]; ok {
+				heapUsed := int64(groupSnap.HeapAllocBytes)
+				mem.HeapUsedBytes = &heapUsed
+
+				// GC pause: convert nanoseconds to milliseconds
+				gcPauseMs := float64(groupSnap.PauseTotalNs) / 1e6
+				mem.GcPauseMs = &gcPauseMs
+
+				gcCount := int64(groupSnap.NumGC)
+				mem.GcCount = &gcCount
+
+				// TracedPeakBytes: use HeapSys as a proxy for peak traced memory
+				tracedPeak := int64(groupSnap.HeapSysBytes)
+				mem.TracedPeakBytes = &tracedPeak
+			}
+
+			// Also use the overall "after" snapshot for heap data if no group match
+			if mem.HeapUsedBytes == nil {
+				heapUsed := int64(memStats.After.HeapAllocBytes)
+				mem.HeapUsedBytes = &heapUsed
+			}
+		}
+
 		op := OperationEntry{
 			Iterations:          r.N,
 			MeanNs:              int64(math.Round(meanNs)),
@@ -233,10 +310,7 @@ func main() {
 			MinNs:               int64(math.Round(minNs)),
 			MaxNs:               int64(math.Round(maxNs)),
 			ThroughputOpsPerSec: math.Round(throughput*100) / 100,
-			Memory: MemoryEntry{
-				AllocBytesPerOp: &bytesPerOp,
-				AllocCountPerOp: &allocsPerOp,
-			},
+			Memory:              mem,
 		}
 
 		ds.Operations[r.Operation] = op
@@ -244,7 +318,7 @@ func main() {
 	}
 
 	report := Report{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		SDKID:         "aas-core3-golang",
 		Metadata: map[string]string{
 			"language":            "go",

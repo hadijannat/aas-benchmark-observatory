@@ -1,17 +1,42 @@
 #!/usr/bin/env python3
-"""Convert criterion benchmark results to report.json schema.
+"""Convert criterion benchmark results to report.json schema v2.
 
 Usage:
     python3 emit_report.py <criterion_target_dir> <output_path>
 
 Criterion stores results in target/criterion/<group>/<benchmark>/new/estimates.json
 with times in nanoseconds.
+
+Schema v2 additions:
+  - memory.heap_used_bytes, gc_pause_ms, gc_count, traced_peak_bytes
+  - peak_rss_bytes read from /proc/self/status VmHWM (Linux CI only)
 """
 import json
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+def _read_vmhwm_bytes():
+    """Read VmHWM (peak resident set size) from /proc/self/status.
+
+    Returns the value in bytes, or None if unavailable (non-Linux).
+    """
+    try:
+        status_path = Path("/proc/self/status")
+        if not status_path.exists():
+            return None
+        for line in status_path.read_text().splitlines():
+            if line.startswith("VmHWM:"):
+                # Format: "VmHWM:    123456 kB"
+                parts = line.split()
+                if len(parts) >= 2:
+                    kb_value = int(parts[1])
+                    return kb_value * 1024
+    except Exception:
+        pass
+    return None
 
 
 def main():
@@ -21,6 +46,9 @@ def main():
 
     criterion_dir = Path(sys.argv[1])
     output_path = sys.argv[2]
+
+    # Read peak RSS early (will be None on non-Linux)
+    peak_rss_bytes = _read_vmhwm_bytes()
 
     datasets = {}
 
@@ -90,9 +118,13 @@ def main():
                     "p99_ns": None,
                     "throughput_ops_per_sec": throughput,
                     "memory": {
-                        "peak_rss_bytes": None,
+                        "peak_rss_bytes": peak_rss_bytes,
                         "alloc_bytes_per_op": None,
                         "alloc_count_per_op": None,
+                        "heap_used_bytes": None,
+                        "gc_pause_ms": None,
+                        "gc_count": None,
+                        "traced_peak_bytes": None,
                     },
                 }
 
@@ -115,7 +147,7 @@ def main():
                 break
 
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "sdk_id": "basyx-rust",
         "metadata": {
             "language": "rust",
@@ -135,6 +167,10 @@ def main():
         f.write("\n")
 
     print(f"Wrote report to {output_path}", file=sys.stderr)
+    if peak_rss_bytes is not None:
+        print(f"  peak_rss_bytes (VmHWM): {peak_rss_bytes}", file=sys.stderr)
+    else:
+        print("  peak_rss_bytes: unavailable (non-Linux or /proc not mounted)", file=sys.stderr)
 
 
 if __name__ == "__main__":

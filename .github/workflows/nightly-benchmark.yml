@@ -66,7 +66,11 @@ jobs:
         run: bash harness/collect-env.sh > results/${{ matrix.id }}/env.json
 
       - name: Generate datasets
-        run: python3 datasets/generate.py --output-dir datasets/generated
+        run: |
+          python3 datasets/generate.py --output-dir datasets/generated
+          python3 datasets/generate.py --output-dir datasets/generated --xml
+          python3 datasets/generate.py --output-dir datasets/generated --validation-targets
+          python3 datasets/generate.py --output-dir datasets/generated --aasx
 
       - name: Set up Python
         if: matrix.language == 'python'
@@ -226,8 +230,16 @@ jobs:
             mv "$dir" "results/$sdk_id" 2>/dev/null || true
           done
 
+      - name: Download previous results for regression detection
+        continue-on-error: true
+        run: |
+          curl -sSf "https://hadijannat.github.io/aas-benchmark-observatory/data/results.json" \
+            -o previous_results.json || echo '{}' > previous_results.json
+
       - name: Aggregate results
-        run: python3 scripts/aggregate.py
+        run: |
+          python3 scripts/aggregate.py \
+            --previous-results previous_results.json
 
       - name: Prepare Pages content
         run: cp -r dashboard _site

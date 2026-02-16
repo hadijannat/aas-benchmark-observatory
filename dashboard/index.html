@@ -42,7 +42,7 @@
       margin-bottom: 1.5rem;
     }
 
-    /* Tab bar */
+    /* Primary tab bar */
     .tab-bar {
       display: flex;
       gap: 0;
@@ -67,6 +67,32 @@
 
     .tab-content { display: none; }
     .tab-content.active { display: block; }
+
+    /* Sub-tab bar (nested within SDK tab) */
+    .sub-tab-bar {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 1.5rem;
+    }
+
+    .sub-tab-btn {
+      padding: 0.5rem 1rem;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .sub-tab-btn:hover { color: var(--text); }
+    .sub-tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .sub-tab-content { display: none; }
+    .sub-tab-content.active { display: block; }
 
     /* Cards */
     .sdk-card {
@@ -139,6 +165,8 @@
     tr:last-child td { border-bottom: none; }
 
     td.fastest { color: var(--green); font-weight: 600; }
+    td.mem-best { color: var(--green); font-weight: 600; }
+    td.mem-worst { color: var(--red); }
 
     .metric-grid {
       display: grid;
@@ -191,6 +219,51 @@
       padding: 3rem 2rem;
       color: var(--text-muted);
     }
+
+    /* Regression indicators */
+    .reg-arrow {
+      display: inline-block;
+      margin-left: 0.35rem;
+      font-size: 0.75rem;
+      cursor: help;
+      position: relative;
+    }
+
+    .reg-arrow.regression { color: var(--red); }
+    .reg-arrow.improvement { color: var(--green); }
+
+    .reg-arrow .reg-tooltip {
+      display: none;
+      position: absolute;
+      bottom: 125%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.4rem 0.6rem;
+      font-size: 0.7rem;
+      white-space: nowrap;
+      color: var(--text);
+      z-index: 10;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    }
+
+    .reg-arrow:hover .reg-tooltip { display: block; }
+
+    .reg-direction { font-weight: 600; }
+    .reg-direction.regression { color: var(--red); }
+    .reg-direction.improvement { color: var(--green); }
+
+    .ratio-badge {
+      font-size: 0.7rem;
+      padding: 0.1rem 0.4rem;
+      border-radius: 3px;
+      margin-left: 0.35rem;
+    }
+    .ratio-badge.slow { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+    .ratio-badge.fast { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+    .ratio-badge.neutral { background: rgba(139, 148, 158, 0.15); color: var(--text-muted); }
   </style>
 </head>
 <body>
@@ -205,10 +278,19 @@
   <script>
     const app = document.getElementById('app');
 
+    // ── Constants ──────────────────────────────────────────
+    const CORE_OPS = ['deserialize', 'validate', 'traverse', 'update', 'serialize'];
+    const XML_OPS = ['deserialize_xml', 'serialize_xml'];
+    const AASX_OPS = ['aasx_extract', 'aasx_repackage'];
+    const CORE_DATASETS = ['wide', 'deep', 'mixed'];
+    const VAL_DATASETS = ['val_regex', 'val_cardinality', 'val_referential'];
+    const AASX_DATASETS = ['aasx_small', 'aasx_medium'];
+
+    // ── Helpers ───────────────────────────────────────────
     function esc(s) {
       const d = document.createElement('div');
       d.textContent = String(s ?? '');
-      return d.innerHTML;
+      return d.textContent;
     }
 
     function fmtNs(ns) {
@@ -229,6 +311,7 @@
 
     function fmtMs(v) { return v != null ? v.toFixed(1) + ' ms' : '\u2014'; }
     function fmtNum(v) { return v != null ? v.toFixed(2) : '\u2014'; }
+    function fmtPct(v) { return v != null ? (v >= 0 ? '+' : '') + v.toFixed(1) + '%' : '\u2014'; }
 
     function metricBox(label, value) {
       const box = document.createElement('div');
@@ -243,24 +326,63 @@
       return box;
     }
 
-    // ── Tab switching ──────────────────────────────────────
+    function getPrimaryMemory(opData) {
+      const m = opData?.memory;
+      if (!m) return null;
+      return m.peak_rss_bytes ?? m.traced_peak_bytes ?? m.heap_used_bytes ?? m.alloc_bytes_per_op ?? null;
+    }
+
+    // ── Tab switching ─────────────────────────────────────
     function setupTabs() {
-      const btns = document.querySelectorAll('.tab-btn');
-      btns.forEach(btn => {
+      document.querySelectorAll('.tab-bar .tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-          btns.forEach(b => b.classList.remove('active'));
+          btn.parentElement.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
           document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
-          document.getElementById(btn.dataset.tab).classList.add('active');
+          const target = document.getElementById(btn.dataset.tab);
+          if (target) target.classList.add('active');
+        });
+      });
+      document.querySelectorAll('.sub-tab-bar .sub-tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const bar = btn.parentElement;
+          bar.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          const parent = bar.parentElement;
+          parent.querySelectorAll(':scope > .sub-tab-content').forEach(tc => tc.classList.remove('active'));
+          const target = parent.querySelector('#' + btn.dataset.subtab);
+          if (target) target.classList.add('active');
         });
       });
     }
 
-    // ── SDK Pipeline Benchmarks tab ────────────────────────
-    const OPS = ['deserialize', 'validate', 'traverse', 'update', 'serialize'];
-    const DATASETS = ['wide', 'deep', 'mixed'];
+    // ── Regression lookup ─────────────────────────────────
+    function buildRegressionLookup(sdkResults) {
+      const lookup = {};
+      for (const sdk of sdkResults) {
+        if (sdk.regressions) {
+          for (const reg of sdk.regressions) {
+            lookup[sdk.id + '/' + reg.dataset + '/' + reg.operation] = reg;
+          }
+        }
+      }
+      return lookup;
+    }
 
-    function buildSdkComparisonTable(dataset, sdkResults) {
+    function regressionArrow(reg) {
+      if (!reg) return null;
+      const span = document.createElement('span');
+      span.className = 'reg-arrow ' + reg.direction;
+      span.textContent = reg.direction === 'regression' ? '\u25B2' : '\u25BC';
+      const tip = document.createElement('span');
+      tip.className = 'reg-tooltip';
+      tip.textContent = fmtPct(reg.change_pct) + ' (CI: ' + fmtPct(reg.ci_lower_pct) + ' to ' + fmtPct(reg.ci_upper_pct) + ')';
+      span.appendChild(tip);
+      return span;
+    }
+
+    // ── SDK Timing sub-tab ────────────────────────────────
+    function buildSdkComparisonTable(dataset, sdkResults, regLookup) {
       const entries = sdkResults
         .filter(s => s.pipeline?.datasets?.[dataset])
         .map(s => ({ id: s.id, name: s.name, lang: s.pipeline.metadata?.language, data: s.pipeline.datasets[dataset] }));
@@ -297,13 +419,12 @@
       thead.appendChild(headRow);
       table.appendChild(thead);
 
-      // Build union of all operations for this dataset
       const opSet = new Set();
       for (const e of entries) {
         for (const op of Object.keys(e.data.operations || {})) opSet.add(op);
       }
-      const ops = OPS.filter(op => opSet.has(op));
-      // Append any extra operations not in the canonical list
+      const allKnown = [...CORE_OPS, ...XML_OPS, ...AASX_OPS];
+      const ops = allKnown.filter(op => opSet.has(op));
       for (const op of opSet) { if (!ops.includes(op)) ops.push(op); }
 
       const tbody = document.createElement('tbody');
@@ -332,6 +453,11 @@
           td.textContent = fmtNs(values[i]);
           if (values[i] != null && values[i] === minNs) {
             td.className = 'fastest';
+          }
+          if (regLookup) {
+            const reg = regLookup[entries[i].id + '/' + dataset + '/' + op];
+            const arrow = regressionArrow(reg);
+            if (arrow) td.appendChild(arrow);
           }
           tr.appendChild(td);
         }
@@ -370,7 +496,6 @@
       const body = document.createElement('div');
       body.className = 'sdk-body';
 
-      // Metadata section (runtime, harness, package version)
       if (meta) {
         const metaSection = document.createElement('div');
         metaSection.className = 'section';
@@ -390,7 +515,7 @@
 
       const datasets = sdk.pipeline?.datasets;
       if (datasets) {
-        for (const ds of DATASETS) {
+        for (const ds of CORE_DATASETS) {
           const dsData = datasets[ds];
           if (!dsData?.operations) continue;
 
@@ -426,7 +551,7 @@
       return card;
     }
 
-    function renderSdkTab(container, sdkResults) {
+    function renderTimingSubtab(container, sdkResults) {
       if (!sdkResults || sdkResults.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'empty-state';
@@ -435,8 +560,10 @@
         return;
       }
 
-      for (const ds of DATASETS) {
-        const table = buildSdkComparisonTable(ds, sdkResults);
+      const regLookup = buildRegressionLookup(sdkResults);
+
+      for (const ds of CORE_DATASETS) {
+        const table = buildSdkComparisonTable(ds, sdkResults, regLookup);
         if (table) container.appendChild(table);
       }
 
@@ -451,16 +578,454 @@
       }
     }
 
-    // ── Server API Benchmarks tab ──────────────────────────
+    // ── SDK Memory sub-tab ────────────────────────────────
+    function buildMemoryTable(dataset, sdkResults) {
+      const entries = sdkResults
+        .filter(s => s.pipeline?.datasets?.[dataset])
+        .map(s => ({ id: s.id, name: s.name, data: s.pipeline.datasets[dataset] }));
+
+      if (entries.length === 0) return null;
+
+      const opSet = new Set();
+      for (const e of entries) {
+        for (const op of Object.keys(e.data.operations || {})) opSet.add(op);
+      }
+      const allKnown = [...CORE_OPS, ...XML_OPS, ...AASX_OPS];
+      const ops = allKnown.filter(op => opSet.has(op));
+      for (const op of opSet) { if (!ops.includes(op)) ops.push(op); }
+
+      let hasAnyMemory = false;
+      for (const e of entries) {
+        for (const op of ops) {
+          if (getPrimaryMemory(e.data.operations?.[op]) != null) {
+            hasAnyMemory = true;
+            break;
+          }
+        }
+        if (hasAnyMemory) break;
+      }
+      if (!hasAnyMemory) return null;
+
+      const section = document.createElement('div');
+      section.className = 'dataset-section';
+
+      const h3 = document.createElement('h3');
+      h3.textContent = dataset.charAt(0).toUpperCase() + dataset.slice(1) + ' Dataset \u2014 Peak Memory';
+      section.appendChild(h3);
+
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      const headers = ['Operation', ...entries.map(e => e.name), 'Lowest'];
+      for (const h of headers) {
+        const th = document.createElement('th');
+        th.textContent = h;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      for (const op of ops) {
+        const tr = document.createElement('tr');
+        const tdOp = document.createElement('td');
+        tdOp.textContent = op;
+        tr.appendChild(tdOp);
+
+        let minMem = Infinity;
+        let maxMem = -Infinity;
+        let lowestName = '\u2014';
+        const values = [];
+
+        for (const entry of entries) {
+          const mem = getPrimaryMemory(entry.data.operations?.[op]);
+          values.push(mem);
+          if (mem != null && mem > 0) {
+            if (mem < minMem) { minMem = mem; lowestName = entry.name; }
+            if (mem > maxMem) { maxMem = mem; }
+          }
+        }
+
+        for (let i = 0; i < entries.length; i++) {
+          const td = document.createElement('td');
+          td.textContent = fmtBytes(values[i]);
+          if (values[i] != null && values[i] > 0) {
+            if (values[i] === minMem && minMem !== maxMem) td.className = 'mem-best';
+            else if (values[i] === maxMem && minMem !== maxMem) td.className = 'mem-worst';
+          }
+          tr.appendChild(td);
+        }
+
+        const tdLowest = document.createElement('td');
+        tdLowest.textContent = lowestName;
+        tdLowest.className = 'mem-best';
+        tr.appendChild(tdLowest);
+
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      section.appendChild(table);
+      return section;
+    }
+
+    function renderMemorySubtab(container, sdkResults) {
+      if (!sdkResults || sdkResults.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No memory profiling data available yet.';
+        container.appendChild(empty);
+        return;
+      }
+
+      let hasAnyTable = false;
+      for (const ds of CORE_DATASETS) {
+        const table = buildMemoryTable(ds, sdkResults);
+        if (table) { container.appendChild(table); hasAnyTable = true; }
+      }
+
+      if (!hasAnyTable) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No memory profiling data available. Memory metrics will appear after the next benchmark run.';
+        container.appendChild(empty);
+      }
+    }
+
+    // ── SDK Validation sub-tab ────────────────────────────
+    function renderValidationSubtab(container, sdkResults) {
+      if (!sdkResults || sdkResults.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No validation analysis data available yet.';
+        container.appendChild(empty);
+        return;
+      }
+
+      const entries = sdkResults.filter(s => {
+        const ds = s.pipeline?.datasets;
+        if (!ds) return false;
+        return VAL_DATASETS.some(vd => ds[vd]?.operations?.validate);
+      }).map(s => ({ id: s.id, name: s.name, datasets: s.pipeline.datasets }));
+
+      if (entries.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No targeted validation datasets found. Run benchmarks with validation target datasets (val_regex, val_cardinality, val_referential).';
+        container.appendChild(empty);
+        return;
+      }
+
+      const desc = document.createElement('p');
+      desc.style.cssText = 'color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;';
+      desc.textContent = 'Validation performance on targeted datasets that stress specific constraint categories. Ratios compare against the mixed baseline dataset.';
+      container.appendChild(desc);
+
+      const section = document.createElement('div');
+      section.className = 'dataset-section';
+
+      const h3 = document.createElement('h3');
+      h3.textContent = 'Validate Operation \u2014 Targeted Datasets';
+      section.appendChild(h3);
+
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      const headers = ['Dataset', ...entries.map(e => e.name)];
+      for (const h of headers) {
+        const th = document.createElement('th');
+        th.textContent = h;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const mixedBaseline = {};
+      for (const e of entries) {
+        const mixedValidate = e.datasets?.mixed?.operations?.validate?.mean_ns;
+        if (mixedValidate) mixedBaseline[e.id] = mixedValidate;
+      }
+
+      const tbody = document.createElement('tbody');
+
+      // Mixed baseline row
+      const trBaseline = document.createElement('tr');
+      const tdBaselineLabel = document.createElement('td');
+      tdBaselineLabel.textContent = 'mixed ';
+      const baselineNote = document.createElement('span');
+      baselineNote.style.cssText = 'color:var(--text-muted);font-size:0.75rem';
+      baselineNote.textContent = '(baseline)';
+      tdBaselineLabel.appendChild(baselineNote);
+      trBaseline.appendChild(tdBaselineLabel);
+      for (const entry of entries) {
+        const td = document.createElement('td');
+        const val = entry.datasets?.mixed?.operations?.validate?.mean_ns;
+        td.textContent = fmtNs(val);
+        trBaseline.appendChild(td);
+      }
+      tbody.appendChild(trBaseline);
+
+      const valLabels = {
+        'val_regex': 'Regex Patterns',
+        'val_cardinality': 'Cardinality Edges',
+        'val_referential': 'Cross-References',
+      };
+
+      for (const vd of VAL_DATASETS) {
+        const tr = document.createElement('tr');
+        const tdLabel = document.createElement('td');
+        tdLabel.textContent = valLabels[vd] || vd;
+        tr.appendChild(tdLabel);
+
+        for (const entry of entries) {
+          const td = document.createElement('td');
+          const val = entry.datasets?.[vd]?.operations?.validate?.mean_ns;
+          td.textContent = fmtNs(val);
+
+          const baseline = mixedBaseline[entry.id];
+          if (val != null && baseline != null && baseline > 0) {
+            const ratio = val / baseline;
+            const ratioBadge = document.createElement('span');
+            ratioBadge.className = 'ratio-badge ' + (ratio > 1.5 ? 'slow' : ratio < 0.7 ? 'fast' : 'neutral');
+            ratioBadge.textContent = ratio.toFixed(1) + 'x';
+            td.appendChild(ratioBadge);
+          }
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+
+      table.appendChild(tbody);
+      section.appendChild(table);
+      container.appendChild(section);
+    }
+
+    // ── SDK AASX sub-tab ──────────────────────────────────
+    function renderAasxSubtab(container, sdkResults) {
+      if (!sdkResults || sdkResults.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No AASX benchmark data available yet.';
+        container.appendChild(empty);
+        return;
+      }
+
+      const entries = sdkResults.filter(s => {
+        const ds = s.pipeline?.datasets;
+        if (!ds) return false;
+        return AASX_DATASETS.some(ad => ds[ad] && Object.keys(ds[ad].operations || {}).some(op => AASX_OPS.includes(op)));
+      }).map(s => ({ id: s.id, name: s.name, datasets: s.pipeline.datasets }));
+
+      if (entries.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No SDKs have AASX benchmark results. AASX packaging benchmarks require datasets generated with --aasx flag.';
+        container.appendChild(empty);
+        return;
+      }
+
+      const desc = document.createElement('p');
+      desc.style.cssText = 'color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;';
+      desc.textContent = 'AASX packaging benchmarks measure extraction (reading) and repackaging (writing) of OPC-based AAS packages.';
+      container.appendChild(desc);
+
+      for (const ad of AASX_DATASETS) {
+        const section = document.createElement('div');
+        section.className = 'dataset-section';
+
+        const h3 = document.createElement('h3');
+        h3.textContent = ad.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+        section.appendChild(h3);
+
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        const headRow = document.createElement('tr');
+        const headers = ['Operation', ...entries.map(e => e.name)];
+        for (const h of headers) {
+          const th = document.createElement('th');
+          th.textContent = h;
+          headRow.appendChild(th);
+        }
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        let hasData = false;
+
+        for (const op of AASX_OPS) {
+          const tr = document.createElement('tr');
+          const tdOp = document.createElement('td');
+          tdOp.textContent = op;
+          tr.appendChild(tdOp);
+
+          for (const entry of entries) {
+            const td = document.createElement('td');
+            const opData = entry.datasets?.[ad]?.operations?.[op];
+            const meanNs = opData?.mean_ns;
+            td.textContent = fmtNs(meanNs);
+            if (meanNs != null) hasData = true;
+
+            const mem = getPrimaryMemory(opData);
+            if (mem != null) {
+              const memSpan = document.createElement('div');
+              memSpan.style.cssText = 'font-size:0.7rem;color:var(--text-muted);';
+              memSpan.textContent = fmtBytes(mem) + ' mem';
+              td.appendChild(memSpan);
+            }
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+
+        if (hasData) {
+          table.appendChild(tbody);
+          section.appendChild(table);
+          container.appendChild(section);
+        }
+      }
+    }
+
+    // ── SDK Regressions sub-tab ───────────────────────────
+    function renderRegressionsSubtab(container, sdkResults) {
+      const allRegs = [];
+      for (const sdk of sdkResults) {
+        if (sdk.regressions) {
+          for (const reg of sdk.regressions) {
+            allRegs.push({ sdkName: sdk.name, sdkId: sdk.id, ...reg });
+          }
+        }
+      }
+
+      if (allRegs.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No regressions or improvements detected. Regression detection requires a previous results.json for comparison.';
+        container.appendChild(empty);
+        return;
+      }
+
+      const desc = document.createElement('p');
+      desc.style.cssText = 'color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;';
+      desc.textContent = allRegs.length + ' significant change(s) detected against the previous benchmark run (95% confidence, >5% threshold).';
+      container.appendChild(desc);
+
+      const regCount = allRegs.filter(r => r.direction === 'regression').length;
+      const impCount = allRegs.filter(r => r.direction === 'improvement').length;
+      const summaryGrid = document.createElement('div');
+      summaryGrid.className = 'metric-grid';
+      summaryGrid.style.marginBottom = '1.5rem';
+      summaryGrid.appendChild(metricBox('Regressions', String(regCount)));
+      summaryGrid.appendChild(metricBox('Improvements', String(impCount)));
+      container.appendChild(summaryGrid);
+
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      for (const h of ['SDK', 'Dataset', 'Operation', 'Previous', 'Current', 'Change', 'CI (95%)', 'Direction']) {
+        const th = document.createElement('th');
+        th.textContent = h;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      for (const r of allRegs) {
+        const tr = document.createElement('tr');
+        const cells = [
+          r.sdkName,
+          r.dataset,
+          r.operation,
+          fmtNs(r.previous_mean_ns),
+          fmtNs(r.current_mean_ns),
+          fmtPct(r.change_pct),
+          fmtPct(r.ci_lower_pct) + ' to ' + fmtPct(r.ci_upper_pct),
+        ];
+        for (const c of cells) {
+          const td = document.createElement('td');
+          td.textContent = c;
+          tr.appendChild(td);
+        }
+        const tdDir = document.createElement('td');
+        const dirSpan = document.createElement('span');
+        dirSpan.className = 'reg-direction ' + r.direction;
+        dirSpan.textContent = r.direction === 'regression' ? '\u25B2 Regression' : '\u25BC Improvement';
+        tdDir.appendChild(dirSpan);
+        tr.appendChild(tdDir);
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      container.appendChild(table);
+    }
+
+    // ── SDK tab (with sub-tabs) ───────────────────────────
+    function renderSdkTab(container, sdkResults) {
+      if (!sdkResults || sdkResults.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No SDK pipeline benchmark results available yet.';
+        container.appendChild(empty);
+        return;
+      }
+
+      const subBar = document.createElement('div');
+      subBar.className = 'sub-tab-bar';
+      const subTabs = [
+        { id: 'subtab-timing', label: 'Timing' },
+        { id: 'subtab-memory', label: 'Memory' },
+        { id: 'subtab-validation', label: 'Validation' },
+        { id: 'subtab-aasx', label: 'AASX' },
+        { id: 'subtab-regressions', label: 'Regressions' },
+      ];
+      for (let i = 0; i < subTabs.length; i++) {
+        const btn = document.createElement('button');
+        btn.className = 'sub-tab-btn' + (i === 0 ? ' active' : '');
+        btn.textContent = subTabs[i].label;
+        btn.dataset.subtab = subTabs[i].id;
+        subBar.appendChild(btn);
+      }
+      container.appendChild(subBar);
+
+      const timingContent = document.createElement('div');
+      timingContent.id = 'subtab-timing';
+      timingContent.className = 'sub-tab-content active';
+      renderTimingSubtab(timingContent, sdkResults);
+      container.appendChild(timingContent);
+
+      const memoryContent = document.createElement('div');
+      memoryContent.id = 'subtab-memory';
+      memoryContent.className = 'sub-tab-content';
+      renderMemorySubtab(memoryContent, sdkResults);
+      container.appendChild(memoryContent);
+
+      const validationContent = document.createElement('div');
+      validationContent.id = 'subtab-validation';
+      validationContent.className = 'sub-tab-content';
+      renderValidationSubtab(validationContent, sdkResults);
+      container.appendChild(validationContent);
+
+      const aasxContent = document.createElement('div');
+      aasxContent.id = 'subtab-aasx';
+      aasxContent.className = 'sub-tab-content';
+      renderAasxSubtab(aasxContent, sdkResults);
+      container.appendChild(aasxContent);
+
+      const regContent = document.createElement('div');
+      regContent.id = 'subtab-regressions';
+      regContent.className = 'sub-tab-content';
+      renderRegressionsSubtab(regContent, sdkResults);
+      container.appendChild(regContent);
+    }
+
+    // ── Server API Benchmarks tab ─────────────────────────
     function getConformanceStatus(conf) {
       if (!conf) return { cls: 'na', label: 'No data' };
       const passed = conf.checks_passed ?? 0;
       const total = conf.checks_total ?? 0;
       if (total === 0) return { cls: 'na', label: 'No checks' };
-      if (passed === total) return { cls: 'pass', label: `${passed}/${total} passed` };
-      if (passed === 0) return { cls: 'fail', label: `0/${total} passed` };
+      if (passed === total) return { cls: 'pass', label: passed + '/' + total + ' passed' };
+      if (passed === 0) return { cls: 'fail', label: '0/' + total + ' passed' };
       const pct = Math.round((passed / total) * 100);
-      return { cls: pct >= 70 ? 'warn' : 'fail', label: `${passed}/${total} passed (${pct}%)` };
+      return { cls: pct >= 70 ? 'warn' : 'fail', label: passed + '/' + total + ' passed (' + pct + '%)' };
     }
 
     function buildConformanceSection(conf) {
@@ -472,7 +1037,7 @@
       title.className = 'section-title';
       const totalPassed = conf.checks_passed ?? 0;
       const totalChecks = conf.checks_total ?? 0;
-      title.textContent = `Conformance \u2014 ${totalPassed}/${totalChecks} checks passed across ${conf.total_profiles || 0} profiles`;
+      title.textContent = 'Conformance \u2014 ' + totalPassed + '/' + totalChecks + ' checks passed across ' + (conf.total_profiles || 0) + ' profiles';
       section.appendChild(title);
 
       const table = document.createElement('table');
@@ -497,7 +1062,7 @@
           const td3 = document.createElement('td');
           const rPassed = r.checks_passed ?? 0;
           const rTotal = r.checks_total ?? 0;
-          td3.textContent = rTotal > 0 ? `${rPassed}/${rTotal}` : '\u2014';
+          td3.textContent = rTotal > 0 ? rPassed + '/' + rTotal : '\u2014';
           const td4 = document.createElement('td');
           const badge = document.createElement('span');
           if (rTotal === 0) {
@@ -508,8 +1073,8 @@
             badge.textContent = 'Pass';
           } else {
             const pct = Math.round((rPassed / rTotal) * 100);
-            badge.className = `badge badge-${pct >= 70 ? 'warn' : 'fail'}`;
-            badge.textContent = `${pct}%`;
+            badge.className = 'badge badge-' + (pct >= 70 ? 'warn' : 'fail');
+            badge.textContent = pct + '%';
           }
           td4.appendChild(badge);
           tr.append(td1, td2, td3, td4);
@@ -544,19 +1109,19 @@
       if (benchmarks.scenarios?.metrics) {
         const m = benchmarks.scenarios.metrics;
         const dur = m.http_req_duration?.values;
-        grid.appendChild(metricBox('HTTP Req Duration (p95)', dur?.['p(95)'] != null ? `${dur['p(95)'].toFixed(1)} ms` : '\u2014'));
-        grid.appendChild(metricBox('HTTP Req Duration (med)', dur?.med != null ? `${dur.med.toFixed(1)} ms` : '\u2014'));
+        grid.appendChild(metricBox('HTTP Req Duration (p95)', dur?.['p(95)'] != null ? dur['p(95)'].toFixed(1) + ' ms' : '\u2014'));
+        grid.appendChild(metricBox('HTTP Req Duration (med)', dur?.med != null ? dur.med.toFixed(1) + ' ms' : '\u2014'));
         grid.appendChild(metricBox('Requests/sec', m.http_reqs?.values?.rate != null ? m.http_reqs.values.rate.toFixed(2) : '\u2014'));
         const checks = m.checks?.values;
-        const checkRate = checks ? `${checks.passes ?? 0}/${(checks.passes ?? 0) + (checks.fails ?? 0)}` : '\u2014';
+        const checkRate = checks ? (checks.passes ?? 0) + '/' + ((checks.passes ?? 0) + (checks.fails ?? 0)) : '\u2014';
         grid.appendChild(metricBox('Checks Passed', checkRate));
       }
 
       if (benchmarks.crud?.metrics) {
         const m = benchmarks.crud.metrics;
         const dur = m.http_req_duration?.values;
-        grid.appendChild(metricBox('CRUD Duration (p95)', dur?.['p(95)'] != null ? `${dur['p(95)'].toFixed(1)} ms` : '\u2014'));
-        grid.appendChild(metricBox('CRUD Duration (med)', dur?.med != null ? `${dur.med.toFixed(1)} ms` : '\u2014'));
+        grid.appendChild(metricBox('CRUD Duration (p95)', dur?.['p(95)'] != null ? dur['p(95)'].toFixed(1) + ' ms' : '\u2014'));
+        grid.appendChild(metricBox('CRUD Duration (med)', dur?.med != null ? dur.med.toFixed(1) + ' ms' : '\u2014'));
         grid.appendChild(metricBox('CRUD Requests/sec', m.http_reqs?.values?.rate != null ? m.http_reqs.values.rate.toFixed(2) : '\u2014'));
       }
 
@@ -577,10 +1142,10 @@
       const table = document.createElement('table');
       const tbody = document.createElement('tbody');
       const rows = [
-        ['CPU', `${env.cpu_count || '\u2014'} cores`],
-        ['Memory', `${env.total_memory_mb || '\u2014'} MB`],
+        ['CPU', (env.cpu_count || '\u2014') + ' cores'],
+        ['Memory', (env.total_memory_mb || '\u2014') + ' MB'],
         ['Docker', env.docker_version || '\u2014'],
-        ['OS / Arch', `${env.os || '\u2014'} / ${env.arch || '\u2014'}`],
+        ['OS / Arch', (env.os || '\u2014') + ' / ' + (env.arch || '\u2014')],
       ];
       for (const [label, value] of rows) {
         const tr = document.createElement('tr');
@@ -617,7 +1182,7 @@
 
         const confStatus = getConformanceStatus(srv.conformance);
         const badge = document.createElement('span');
-        badge.className = `badge badge-${confStatus.cls}`;
+        badge.className = 'badge badge-' + confStatus.cls;
         badge.textContent = confStatus.label;
         header.appendChild(badge);
         card.appendChild(header);
@@ -639,18 +1204,16 @@
       }
     }
 
-    // ── Main render ────────────────────────────────────────
+    // ── Main render ───────────────────────────────────────
     function render(data) {
       app.replaceChildren();
 
       const ts = document.createElement('p');
       ts.className = 'timestamp';
-      ts.textContent = `Last updated: ${new Date(data.generated_at).toLocaleString()}`;
+      ts.textContent = 'Last updated: ' + new Date(data.generated_at).toLocaleString();
       app.appendChild(ts);
 
-      // Backward compat: if old format (data.sdks), treat as server_benchmarks
       const sdkResults = (data.sdk_benchmarks || []).map(s => {
-        // Normalize: if pipeline lacks .datasets key, it's the old format (pipeline IS datasets)
         if (s.pipeline && !s.pipeline.datasets && !s.pipeline.schema_version) {
           s.pipeline = { datasets: s.pipeline, metadata: {} };
         }
@@ -686,7 +1249,6 @@
       renderServerTab(srvTab, serverResults);
       app.appendChild(srvTab);
 
-      // If no SDK results, default to server tab
       if (sdkResults.length === 0 && serverResults.length > 0) {
         sdkBtn.classList.remove('active');
         srvBtn.classList.add('active');
@@ -700,7 +1262,7 @@
     async function loadResults() {
       try {
         const res = await fetch('data/results.json');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         render(data);
       } catch (err) {

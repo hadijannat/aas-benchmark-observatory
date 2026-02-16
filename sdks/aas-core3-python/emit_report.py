@@ -6,11 +6,11 @@ Usage:
 """
 
 import argparse
-import datetime
 import importlib.metadata
 import json
 import platform
 import sys
+from datetime import datetime, timezone
 
 
 def parse_benchmark_name(name):
@@ -69,6 +69,10 @@ def build_operation_entry(bench):
             "peak_rss_bytes": None,
             "alloc_bytes_per_op": None,
             "alloc_count_per_op": None,
+            "heap_used_bytes": None,
+            "gc_pause_ms": None,
+            "gc_count": None,
+            "traced_peak_bytes": None,
         },
     }
 
@@ -122,6 +126,7 @@ def main():
         if mem_key in memory_data:
             mem = memory_data[mem_key]
             op_entry["memory"]["peak_rss_bytes"] = mem.get("peak_rss_bytes")
+            op_entry["memory"]["traced_peak_bytes"] = mem.get("traced_peak_bytes")
 
         datasets[dataset]["operations"][operation] = op_entry
 
@@ -135,14 +140,14 @@ def main():
         }
 
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "sdk_id": "aas-core3-python",
         "metadata": {
             "language": "python",
             "runtime_version": f"Python {python_version}",
             "sdk_package_version": sdk_version,
             "benchmark_harness": f"pytest-benchmark {harness_version}",
-            "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         },
         "datasets": datasets_output,
     }

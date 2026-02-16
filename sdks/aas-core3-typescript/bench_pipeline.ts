@@ -2,13 +2,14 @@
  * Benchmarks for aas-core3.0 TypeScript SDK using tinybench.
  *
  * Outputs JSON results to stdout for emit_report.js to consume.
- * Expects DATASETS_DIR env var pointing to directory with dataset JSON files.
+ * Expects DATASETS_DIR env var pointing to directory with dataset JSON/XML files.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { Bench } from "tinybench";
 import * as aasJsonization from "@aas-core-works/aas-core3.0-typescript/jsonization";
+import * as aasXmlization from "@aas-core-works/aas-core3.0-typescript/xmlization";
 import * as aasVerification from "@aas-core-works/aas-core3.0-typescript/verification";
 import * as aasTypes from "@aas-core-works/aas-core3.0-typescript/types";
 
@@ -19,10 +20,18 @@ interface DatasetInfo {
   fileSizeBytes: number;
 }
 
+interface XmlDatasetInfo {
+  name: string;
+  filePath: string;
+  raw: string;
+  fileSizeBytes: number;
+}
+
 interface MemorySnapshot {
   rssBefore: number;
   rssAfter: number;
   peakRssBytes: number;
+  heapUsedBytes: number;
 }
 
 interface BenchTaskResult {
@@ -68,8 +77,68 @@ function discoverDatasets(): DatasetInfo[] {
   });
 }
 
-function measureMemory(): number {
-  return process.memoryUsage().rss;
+function discoverXmlDatasets(): XmlDatasetInfo[] {
+  const datasetsDir = process.env.DATASETS_DIR;
+  if (!datasetsDir) {
+    return [];
+  }
+
+  if (!fs.existsSync(datasetsDir)) {
+    return [];
+  }
+
+  const files = fs.readdirSync(datasetsDir).filter((f) => f.endsWith(".xml")).sort();
+
+  return files.map((f) => {
+    const filePath = path.join(datasetsDir, f);
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const stat = fs.statSync(filePath);
+    return {
+      name: path.basename(f, ".xml"),
+      filePath,
+      raw,
+      fileSizeBytes: stat.size,
+    };
+  });
+}
+
+function captureMemory(): { rss: number; heapUsed: number } {
+  const mem = process.memoryUsage();
+  return { rss: mem.rss, heapUsed: mem.heapUsed };
+}
+
+function buildMemorySnapshot(
+  before: { rss: number; heapUsed: number },
+  after: { rss: number; heapUsed: number },
+): MemorySnapshot {
+  return {
+    rssBefore: before.rss,
+    rssAfter: after.rss,
+    peakRssBytes: after.rss - before.rss,
+    heapUsedBytes: after.heapUsed - before.heapUsed,
+  };
+}
+
+function buildResult(
+  dataset: string,
+  operation: string,
+  task: { result: NonNullable<(typeof Bench.prototype.tasks)[0]["result"]> },
+  memory: MemorySnapshot,
+): BenchTaskResult {
+  const r = task.result;
+  return {
+    dataset,
+    operation,
+    iterations: r.totalTime > 0 ? Math.round(r.totalTime / r.mean) : 0,
+    meanMs: r.mean,
+    medianMs: r.p50 ?? null,
+    stddevMs: r.sd ?? null,
+    minMs: r.min,
+    maxMs: r.max,
+    p75Ms: r.p75 ?? null,
+    p99Ms: r.p99 ?? null,
+    memory,
+  };
 }
 
 async function runBenchmarksForDataset(dataset: DatasetInfo): Promise<BenchTaskResult[]> {
@@ -93,26 +162,14 @@ async function runBenchmarksForDataset(dataset: DatasetInfo): Promise<BenchTaskR
     }
   });
 
-  let rssBefore = measureMemory();
+  let memBefore = captureMemory();
   await deserializeBench.run();
-  let rssAfter = measureMemory();
+  let memAfter = captureMemory();
 
-  const deserializeTask = deserializeBench.tasks[0]!;
-  results.push({
-    dataset: dataset.name,
-    operation: "deserialize",
-    iterations: deserializeTask.result!.totalTime > 0
-      ? Math.round(deserializeTask.result!.totalTime / deserializeTask.result!.mean)
-      : 0,
-    meanMs: deserializeTask.result!.mean,
-    medianMs: deserializeTask.result!.p50 ?? null,
-    stddevMs: deserializeTask.result!.sd ?? null,
-    minMs: deserializeTask.result!.min,
-    maxMs: deserializeTask.result!.max,
-    p75Ms: deserializeTask.result!.p75 ?? null,
-    p99Ms: deserializeTask.result!.p99 ?? null,
-    memory: { rssBefore, rssAfter, peakRssBytes: rssAfter - rssBefore },
-  });
+  results.push(buildResult(
+    dataset.name, "deserialize", deserializeBench.tasks[0]! as any,
+    buildMemorySnapshot(memBefore, memAfter),
+  ));
 
   // --- Validate ---
   const validateBench = new Bench({ time: 5000, warmupTime: 1000 });
@@ -123,26 +180,14 @@ async function runBenchmarksForDataset(dataset: DatasetInfo): Promise<BenchTaskR
     }
   });
 
-  rssBefore = measureMemory();
+  memBefore = captureMemory();
   await validateBench.run();
-  rssAfter = measureMemory();
+  memAfter = captureMemory();
 
-  const validateTask = validateBench.tasks[0]!;
-  results.push({
-    dataset: dataset.name,
-    operation: "validate",
-    iterations: validateTask.result!.totalTime > 0
-      ? Math.round(validateTask.result!.totalTime / validateTask.result!.mean)
-      : 0,
-    meanMs: validateTask.result!.mean,
-    medianMs: validateTask.result!.p50 ?? null,
-    stddevMs: validateTask.result!.sd ?? null,
-    minMs: validateTask.result!.min,
-    maxMs: validateTask.result!.max,
-    p75Ms: validateTask.result!.p75 ?? null,
-    p99Ms: validateTask.result!.p99 ?? null,
-    memory: { rssBefore, rssAfter, peakRssBytes: rssAfter - rssBefore },
-  });
+  results.push(buildResult(
+    dataset.name, "validate", validateBench.tasks[0]! as any,
+    buildMemorySnapshot(memBefore, memAfter),
+  ));
 
   // --- Traverse ---
   const traverseBench = new Bench({ time: 5000, warmupTime: 1000 });
@@ -153,26 +198,14 @@ async function runBenchmarksForDataset(dataset: DatasetInfo): Promise<BenchTaskR
     }
   });
 
-  rssBefore = measureMemory();
+  memBefore = captureMemory();
   await traverseBench.run();
-  rssAfter = measureMemory();
+  memAfter = captureMemory();
 
-  const traverseTask = traverseBench.tasks[0]!;
-  results.push({
-    dataset: dataset.name,
-    operation: "traverse",
-    iterations: traverseTask.result!.totalTime > 0
-      ? Math.round(traverseTask.result!.totalTime / traverseTask.result!.mean)
-      : 0,
-    meanMs: traverseTask.result!.mean,
-    medianMs: traverseTask.result!.p50 ?? null,
-    stddevMs: traverseTask.result!.sd ?? null,
-    minMs: traverseTask.result!.min,
-    maxMs: traverseTask.result!.max,
-    p75Ms: traverseTask.result!.p75 ?? null,
-    p99Ms: traverseTask.result!.p99 ?? null,
-    memory: { rssBefore, rssAfter, peakRssBytes: rssAfter - rssBefore },
-  });
+  results.push(buildResult(
+    dataset.name, "traverse", traverseBench.tasks[0]! as any,
+    buildMemorySnapshot(memBefore, memAfter),
+  ));
 
   // --- Update ---
   const updateBench = new Bench({ time: 5000, warmupTime: 1000 });
@@ -186,26 +219,14 @@ async function runBenchmarksForDataset(dataset: DatasetInfo): Promise<BenchTaskR
     }
   });
 
-  rssBefore = measureMemory();
+  memBefore = captureMemory();
   await updateBench.run();
-  rssAfter = measureMemory();
+  memAfter = captureMemory();
 
-  const updateTask = updateBench.tasks[0]!;
-  results.push({
-    dataset: dataset.name,
-    operation: "update",
-    iterations: updateTask.result!.totalTime > 0
-      ? Math.round(updateTask.result!.totalTime / updateTask.result!.mean)
-      : 0,
-    meanMs: updateTask.result!.mean,
-    medianMs: updateTask.result!.p50 ?? null,
-    stddevMs: updateTask.result!.sd ?? null,
-    minMs: updateTask.result!.min,
-    maxMs: updateTask.result!.max,
-    p75Ms: updateTask.result!.p75 ?? null,
-    p99Ms: updateTask.result!.p99 ?? null,
-    memory: { rssBefore, rssAfter, peakRssBytes: rssAfter - rssBefore },
-  });
+  results.push(buildResult(
+    dataset.name, "update", updateBench.tasks[0]! as any,
+    buildMemorySnapshot(memBefore, memAfter),
+  ));
 
   // --- Serialize ---
   const serializeBench = new Bench({ time: 5000, warmupTime: 1000 });
@@ -214,38 +235,78 @@ async function runBenchmarksForDataset(dataset: DatasetInfo): Promise<BenchTaskR
     JSON.stringify(jsonableOut);
   });
 
-  rssBefore = measureMemory();
+  memBefore = captureMemory();
   await serializeBench.run();
-  rssAfter = measureMemory();
+  memAfter = captureMemory();
 
-  const serializeTask = serializeBench.tasks[0]!;
-  results.push({
-    dataset: dataset.name,
-    operation: "serialize",
-    iterations: serializeTask.result!.totalTime > 0
-      ? Math.round(serializeTask.result!.totalTime / serializeTask.result!.mean)
-      : 0,
-    meanMs: serializeTask.result!.mean,
-    medianMs: serializeTask.result!.p50 ?? null,
-    stddevMs: serializeTask.result!.sd ?? null,
-    minMs: serializeTask.result!.min,
-    maxMs: serializeTask.result!.max,
-    p75Ms: serializeTask.result!.p75 ?? null,
-    p99Ms: serializeTask.result!.p99 ?? null,
-    memory: { rssBefore, rssAfter, peakRssBytes: rssAfter - rssBefore },
+  results.push(buildResult(
+    dataset.name, "serialize", serializeBench.tasks[0]! as any,
+    buildMemorySnapshot(memBefore, memAfter),
+  ));
+
+  return results;
+}
+
+async function runXmlBenchmarksForDataset(dataset: XmlDatasetInfo): Promise<BenchTaskResult[]> {
+  const results: BenchTaskResult[] = [];
+
+  // Pre-deserialize to obtain an environment for serialize benchmark
+  const environment = aasXmlization.environmentFromStr(dataset.raw);
+
+  // --- Deserialize XML ---
+  const deserializeXmlBench = new Bench({ time: 5000, warmupTime: 1000 });
+  deserializeXmlBench.add("deserialize_xml", () => {
+    aasXmlization.environmentFromStr(dataset.raw);
   });
+
+  let memBefore = captureMemory();
+  await deserializeXmlBench.run();
+  let memAfter = captureMemory();
+
+  results.push(buildResult(
+    dataset.name, "deserialize_xml", deserializeXmlBench.tasks[0]! as any,
+    buildMemorySnapshot(memBefore, memAfter),
+  ));
+
+  // --- Serialize XML ---
+  const serializeXmlBench = new Bench({ time: 5000, warmupTime: 1000 });
+  serializeXmlBench.add("serialize_xml", () => {
+    aasXmlization.toStr(environment);
+  });
+
+  memBefore = captureMemory();
+  await serializeXmlBench.run();
+  memAfter = captureMemory();
+
+  results.push(buildResult(
+    dataset.name, "serialize_xml", serializeXmlBench.tasks[0]! as any,
+    buildMemorySnapshot(memBefore, memAfter),
+  ));
 
   return results;
 }
 
 async function main(): Promise<void> {
   const datasets = discoverDatasets();
+  const xmlDatasets = discoverXmlDatasets();
   const allResults: BenchTaskResult[] = [];
 
+  // JSON pipeline benchmarks
   for (const dataset of datasets) {
-    process.stderr.write(`Benchmarking dataset: ${dataset.name}\n`);
+    process.stderr.write(`Benchmarking JSON dataset: ${dataset.name}\n`);
     const results = await runBenchmarksForDataset(dataset);
     allResults.push(...results);
+  }
+
+  // XML benchmarks (SRQ-1)
+  if (xmlDatasets.length > 0) {
+    for (const dataset of xmlDatasets) {
+      process.stderr.write(`Benchmarking XML dataset: ${dataset.name}\n`);
+      const results = await runXmlBenchmarksForDataset(dataset);
+      allResults.push(...results);
+    }
+  } else {
+    process.stderr.write("No XML datasets found, skipping XML benchmarks\n");
   }
 
   // Output all results as JSON to stdout
