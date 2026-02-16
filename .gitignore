@@ -38,6 +38,9 @@ Thumbs.db
 # Generated datasets
 datasets/*.json
 datasets/generated/
+sdks/aas-core3-java/target/
+sdks/basyx-rust/target/
+sdks/aas-core3-typescript/node_modules/
 
 # Claude Code
 CLAUDE.md

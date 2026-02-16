@@ -17,6 +17,22 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+CORE_DATASETS = {"wide", "deep", "mixed"}
+CORE_OPERATIONS = {"deserialize", "validate", "traverse", "update", "serialize"}
+
+
+def infer_operation_track(dataset: str, operation_id: str) -> str:
+    """Classify operation into the core track or capability tracks."""
+    if operation_id in {"deserialize_xml", "serialize_xml"}:
+        return "xml"
+    if operation_id in {"aasx_extract", "aasx_repackage"}:
+        return "aasx"
+    if dataset.startswith("val_") and operation_id == "validate":
+        return "validation"
+    if dataset in CORE_DATASETS and operation_id in CORE_OPERATIONS:
+        return "core"
+    return "capability"
+
 
 def _read_vmhwm_bytes():
     """Read VmHWM (peak resident set size) from /proc/self/status.
@@ -84,11 +100,13 @@ def main():
                 min_ns = None
                 max_ns = None
                 iterations = 0
+                sample_count = 0
                 if sample_path.exists():
                     with open(sample_path) as f:
                         sample = json.load(f)
                     times = sample.get("times", [])
                     iters = sample.get("iters", [])
+                    sample_count = len(times)
                     if times and iters:
                         per_op = [t / i for t, i in zip(times, iters) if i > 0]
                         if per_op:
@@ -108,6 +126,11 @@ def main():
                     }
 
                 datasets[ds_name]["operations"][operation] = {
+                    "operation_id": operation,
+                    "operation_track": infer_operation_track(ds_name, operation),
+                    "sample_count": sample_count,
+                    "measurement_semantics": "mean_ns_per_operation",
+                    "failure_state": "ok",
                     "iterations": iterations,
                     "mean_ns": mean_ns,
                     "median_ns": median_ns,

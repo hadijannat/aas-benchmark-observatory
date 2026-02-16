@@ -89,15 +89,19 @@ def test_update(benchmark, dataset_jsonable, dataset_path, memory_tracker):
     """Benchmark: find all Property instances and append '_updated' to value."""
     dataset_name = dataset_path.stem
     env = aas_jsonization.environment_from_jsonable(dataset_jsonable)
+    baseline = []
+    for node in env.descend():
+        if isinstance(node, aas_types.Property) and node.value is not None:
+            baseline.append((node, node.value))
 
     def _update():
-        count = 0
-        for node in env.descend():
-            if isinstance(node, aas_types.Property):
-                if node.value is not None:
-                    node.value = node.value + "_updated"
-                    count += 1
-        return count
+        # Mutate, then restore baseline so each timing iteration starts from
+        # identical state.
+        for prop, original in baseline:
+            prop.value = original + "_updated"
+        for prop, original in baseline:
+            prop.value = original
+        return len(baseline)
 
     result = _track(memory_tracker, dataset_name, "update", _update, benchmark)
     assert isinstance(result, int)

@@ -18,6 +18,21 @@ import (
 	"time"
 )
 
+var (
+	coreDatasets = map[string]bool{
+		"wide":  true,
+		"deep":  true,
+		"mixed": true,
+	}
+	coreOperations = map[string]bool{
+		"deserialize": true,
+		"validate":    true,
+		"traverse":    true,
+		"update":      true,
+		"serialize":   true,
+	}
+)
+
 // GoTestEvent represents a single line from `go test -json` output.
 type GoTestEvent struct {
 	Time    string  `json:"Time"`
@@ -30,53 +45,58 @@ type GoTestEvent struct {
 
 // BenchResult holds parsed benchmark results for a single sub-benchmark.
 type BenchResult struct {
-	Operation string
-	Dataset   string
-	N         int
-	NsPerOp   float64
-	BytesPerOp int64
+	Operation   string
+	Dataset     string
+	N           int
+	NsPerOp     float64
+	BytesPerOp  int64
 	AllocsPerOp int64
-	Runs      []float64 // NsPerOp across -count runs
+	Runs        []float64 // NsPerOp across -count runs
 }
 
 // MemoryEntry holds memory metrics for report output.
 type MemoryEntry struct {
-	PeakRSSBytes     *int64   `json:"peak_rss_bytes"`
-	AllocBytesPerOp  *int64   `json:"alloc_bytes_per_op"`
-	AllocCountPerOp  *int64   `json:"alloc_count_per_op"`
-	HeapUsedBytes    *int64   `json:"heap_used_bytes"`
-	GcPauseMs        *float64 `json:"gc_pause_ms"`
-	GcCount          *int64   `json:"gc_count"`
-	TracedPeakBytes  *int64   `json:"traced_peak_bytes"`
+	PeakRSSBytes    *int64   `json:"peak_rss_bytes"`
+	AllocBytesPerOp *int64   `json:"alloc_bytes_per_op"`
+	AllocCountPerOp *int64   `json:"alloc_count_per_op"`
+	HeapUsedBytes   *int64   `json:"heap_used_bytes"`
+	GcPauseMs       *float64 `json:"gc_pause_ms"`
+	GcCount         *int64   `json:"gc_count"`
+	TracedPeakBytes *int64   `json:"traced_peak_bytes"`
 }
 
 // OperationEntry is one operation in the report.
 type OperationEntry struct {
-	Iterations        int          `json:"iterations"`
-	MeanNs            int64        `json:"mean_ns"`
-	MedianNs          int64        `json:"median_ns"`
-	StddevNs          int64        `json:"stddev_ns"`
-	MinNs             int64        `json:"min_ns"`
-	MaxNs             int64        `json:"max_ns"`
-	P75Ns             *int64       `json:"p75_ns"`
-	P99Ns             *int64       `json:"p99_ns"`
-	ThroughputOpsPerSec float64    `json:"throughput_ops_per_sec"`
-	Memory            MemoryEntry  `json:"memory"`
+	OperationID          string      `json:"operation_id"`
+	OperationTrack       string      `json:"operation_track"`
+	SampleCount          int         `json:"sample_count"`
+	MeasurementSemantics string      `json:"measurement_semantics"`
+	FailureState         string      `json:"failure_state"`
+	Iterations           int         `json:"iterations"`
+	MeanNs               int64       `json:"mean_ns"`
+	MedianNs             int64       `json:"median_ns"`
+	StddevNs             int64       `json:"stddev_ns"`
+	MinNs                int64       `json:"min_ns"`
+	MaxNs                int64       `json:"max_ns"`
+	P75Ns                *int64      `json:"p75_ns"`
+	P99Ns                *int64      `json:"p99_ns"`
+	ThroughputOpsPerSec  float64     `json:"throughput_ops_per_sec"`
+	Memory               MemoryEntry `json:"memory"`
 }
 
 // DatasetEntry holds all operations for one dataset.
 type DatasetEntry struct {
-	FileSizeBytes *int64                   `json:"file_size_bytes"`
-	ElementCount  *int64                   `json:"element_count"`
+	FileSizeBytes *int64                    `json:"file_size_bytes"`
+	ElementCount  *int64                    `json:"element_count"`
 	Operations    map[string]OperationEntry `json:"operations"`
 }
 
 // Report is the top-level output schema.
 type Report struct {
-	SchemaVersion int                      `json:"schema_version"`
-	SDKID         string                   `json:"sdk_id"`
-	Metadata      map[string]string        `json:"metadata"`
-	Datasets      map[string]DatasetEntry  `json:"datasets"`
+	SchemaVersion int                     `json:"schema_version"`
+	SDKID         string                  `json:"sdk_id"`
+	Metadata      map[string]string       `json:"metadata"`
+	Datasets      map[string]DatasetEntry `json:"datasets"`
 }
 
 // sideChannelMemSnapshot mirrors the snapshot struct written by bench_pipeline_test.go.
@@ -100,6 +120,37 @@ type sideChannelMemStats struct {
 var benchLineRegex = regexp.MustCompile(
 	`^Benchmark(\w+)/(\w+)(?:-\d+)?\s+(\d+)\s+([\d.]+)\s+ns/op(?:\s+(\d+)\s+B/op)?(?:\s+(\d+)\s+allocs/op)?`,
 )
+
+func canonicalOperationID(raw string) string {
+	switch strings.ToLower(raw) {
+	case "deserializexml":
+		return "deserialize_xml"
+	case "serializexml":
+		return "serialize_xml"
+	case "aasxextract":
+		return "aasx_extract"
+	case "aasxrepackage":
+		return "aasx_repackage"
+	default:
+		return strings.ToLower(raw)
+	}
+}
+
+func inferOperationTrack(dataset, operationID string) string {
+	switch operationID {
+	case "deserialize_xml", "serialize_xml":
+		return "xml"
+	case "aasx_extract", "aasx_repackage":
+		return "aasx"
+	}
+	if strings.HasPrefix(dataset, "val_") && operationID == "validate" {
+		return "validation"
+	}
+	if coreDatasets[dataset] && coreOperations[operationID] {
+		return "core"
+	}
+	return "capability"
+}
 
 func parseBenchResults(path string) (map[string]*BenchResult, error) {
 	f, err := os.Open(path)
@@ -133,8 +184,8 @@ func parseBenchResults(path string) (map[string]*BenchResult, error) {
 			continue
 		}
 
-		operation := strings.ToLower(matches[1]) // e.g., "deserialize"
-		dataset := matches[2]                     // e.g., "wide"
+		operation := canonicalOperationID(matches[1])
+		dataset := matches[2] // e.g., "wide"
 		n, _ := strconv.Atoi(matches[3])
 		nsPerOp, _ := strconv.ParseFloat(matches[4], 64)
 
@@ -303,14 +354,19 @@ func main() {
 		}
 
 		op := OperationEntry{
-			Iterations:          r.N,
-			MeanNs:              int64(math.Round(meanNs)),
-			MedianNs:            int64(math.Round(medianNs)),
-			StddevNs:            int64(math.Round(stddevNs)),
-			MinNs:               int64(math.Round(minNs)),
-			MaxNs:               int64(math.Round(maxNs)),
-			ThroughputOpsPerSec: math.Round(throughput*100) / 100,
-			Memory:              mem,
+			OperationID:          r.Operation,
+			OperationTrack:       inferOperationTrack(r.Dataset, r.Operation),
+			SampleCount:          len(r.Runs),
+			MeasurementSemantics: "mean_ns_per_operation",
+			FailureState:         "ok",
+			Iterations:           r.N,
+			MeanNs:               int64(math.Round(meanNs)),
+			MedianNs:             int64(math.Round(medianNs)),
+			StddevNs:             int64(math.Round(stddevNs)),
+			MinNs:                int64(math.Round(minNs)),
+			MaxNs:                int64(math.Round(maxNs)),
+			ThroughputOpsPerSec:  math.Round(throughput*100) / 100,
+			Memory:               mem,
 		}
 
 		ds.Operations[r.Operation] = op

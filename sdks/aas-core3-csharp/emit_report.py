@@ -14,6 +14,9 @@ import json
 import sys
 from datetime import datetime, timezone
 
+CORE_DATASETS = {"wide", "deep", "mixed"}
+CORE_OPERATIONS = {"deserialize", "validate", "traverse", "update", "serialize"}
+
 
 # Map BenchmarkDotNet method names to our operation names
 OPERATION_MAP = {
@@ -43,7 +46,20 @@ def extract_operation(benchmark):
     return OPERATION_MAP.get(method, method.lower())
 
 
-def build_operation_entry(benchmark):
+def infer_operation_track(dataset, operation_id):
+    """Classify operation into the core track or capability tracks."""
+    if operation_id in {"deserialize_xml", "serialize_xml"}:
+        return "xml"
+    if operation_id in {"aasx_extract", "aasx_repackage"}:
+        return "aasx"
+    if dataset.startswith("val_") and operation_id == "validate":
+        return "validation"
+    if dataset in CORE_DATASETS and operation_id in CORE_OPERATIONS:
+        return "core"
+    return "capability"
+
+
+def build_operation_entry(benchmark, dataset, operation_id):
     """Build an operation entry from a BenchmarkDotNet benchmark result."""
     stats = benchmark.get("Statistics", {})
 
@@ -88,6 +104,11 @@ def build_operation_entry(benchmark):
         gc_count = sum(int(v) for v in gc_parts)
 
     return {
+        "operation_id": operation_id,
+        "operation_track": infer_operation_track(dataset, operation_id),
+        "sample_count": int(iterations),
+        "measurement_semantics": "mean_ns_per_operation",
+        "failure_state": "ok",
         "iterations": iterations,
         "mean_ns": mean_ns,
         "median_ns": median_ns,
@@ -143,7 +164,7 @@ def main():
                 "operations": {},
             }
 
-        op_entry = build_operation_entry(bench)
+        op_entry = build_operation_entry(bench, dataset, operation)
         datasets[dataset]["operations"][operation] = op_entry
 
     report = {

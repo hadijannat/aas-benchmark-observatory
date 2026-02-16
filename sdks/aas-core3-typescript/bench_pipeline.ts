@@ -29,6 +29,7 @@ interface MemorySnapshot {
 interface BenchTaskResult {
   dataset: string;
   operation: string;
+  sampleCount: number;
   iterations: number;
   meanMs: number;
   medianMs: number | null;
@@ -96,6 +97,7 @@ function buildResult(
   return {
     dataset,
     operation,
+    sampleCount: Array.isArray((r as any).samples) ? (r as any).samples.length : 0,
     iterations: r.totalTime > 0 ? Math.round(r.totalTime / r.mean) : 0,
     meanMs: r.mean,
     medianMs: r.p50 ?? null,
@@ -177,12 +179,19 @@ async function runBenchmarksForDataset(dataset: DatasetInfo): Promise<BenchTaskR
   // --- Update ---
   const updateBench = new Bench({ time: 5000, warmupTime: 1000 });
   updateBench.add("update", () => {
+    const touched: Array<{ prop: aasTypes.Property; original: string }> = [];
     for (const node of environment.descend()) {
       if (node instanceof aasTypes.Property) {
         if (node.value !== null) {
-          node.value = node.value + "_updated";
+          const original = node.value;
+          node.value = original + "_updated";
+          touched.push({ prop: node, original });
         }
       }
+    }
+    // Restore baseline state so each benchmark sample starts from the same input.
+    for (const item of touched) {
+      item.prop.value = item.original;
     }
   });
 

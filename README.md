@@ -2,7 +2,7 @@
 
 Automated benchmarking of Asset Administration Shell (AAS) implementations — both in-process SDK pipelines and server APIs.
 
-[![Monthly Benchmark](https://github.com/hadijannat/aas-benchmark-observatory/actions/workflows/nightly-benchmark.yml/badge.svg)](https://github.com/hadijannat/aas-benchmark-observatory/actions/workflows/nightly-benchmark.yml)
+[![Nightly Benchmark](https://github.com/hadijannat/aas-benchmark-observatory/actions/workflows/nightly-benchmark.yml/badge.svg)](https://github.com/hadijannat/aas-benchmark-observatory/actions/workflows/nightly-benchmark.yml)
 
 ## Architecture
 
@@ -36,7 +36,7 @@ Both → aggregate.py → dashboard/data/results.json → GitHub Pages
 
 ### Workflow
 
-1. **Monthly**: Runs full SDK pipeline + server API benchmarks for all enabled implementations
+1. **Nightly (daily @ 03:00 UTC)**: Runs full SDK pipeline + server API benchmarks for all enabled implementations
 2. **PR Smoke**: On pull requests touching `sdks/`, `servers/`, or `harness/`, runs quick smoke tests
 3. **Weekly Discovery**: Checks Docker Hub for new server versions, opens issues
 
@@ -47,6 +47,16 @@ Both → aggregate.py → dashboard/data/results.json → GitHub Pages
 3. Create `servers/<id>/docker-compose.yml` to launch the server
 4. Open a PR — the smoke test validates your adapter
 5. After review, set `"enabled": true`
+
+## Benchmark Validity Checklist
+
+Before enabling a new adapter, run through:
+- `docs/benchmark-validity-checklist.md`
+
+Related governance docs:
+- `docs/benchmark-validity-findings.md`
+- `docs/benchmark-remediation-backlog.md`
+- `docs/benchmark-validation-report.md`
 
 ## Adding an SDK
 

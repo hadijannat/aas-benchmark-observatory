@@ -33,7 +33,7 @@ def _find_xml_files():
         pytest.skip(f"DATASETS_DIR does not exist: {datasets_dir}")
     files = sorted(p.glob("*.xml"))
     if not files:
-        pytest.skip(f"No XML files found in {datasets_dir}")
+        return [pytest.param(None, marks=pytest.mark.skip(reason=f"No XML files found in {datasets_dir}"))]
     return files
 
 
@@ -47,12 +47,14 @@ def _find_aasx_files():
         pytest.skip(f"DATASETS_DIR does not exist: {datasets_dir}")
     files = sorted(p.glob("*.aasx"))
     if not files:
-        pytest.skip(f"No AASX files found in {datasets_dir}")
+        return [pytest.param(None, marks=pytest.mark.skip(reason=f"No AASX files found in {datasets_dir}"))]
     return files
 
 
 def _dataset_id(path):
     """Extract dataset ID from filename, e.g. 'wide.json' -> 'wide'."""
+    if path is None:
+        return "not-available"
     return path.stem
 
 
@@ -83,6 +85,8 @@ def xml_dataset_path(request):
 @pytest.fixture
 def xml_dataset_raw(xml_dataset_path):
     """Read raw bytes of an XML dataset file."""
+    if xml_dataset_path is None:
+        pytest.skip("XML datasets not available")
     return xml_dataset_path.read_bytes()
 
 

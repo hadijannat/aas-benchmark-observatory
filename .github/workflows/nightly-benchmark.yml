@@ -110,6 +110,9 @@ jobs:
       - name: Run benchmarks
         run: bash ${{ matrix.adapter_dir }}/run-benchmarks.sh datasets/generated results/${{ matrix.id }}
 
+      - name: Validate report output
+        run: python3 scripts/validate_report.py results/${{ matrix.id }}/report.json
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
@@ -171,6 +174,25 @@ jobs:
           bash harness/conformance/run_aas_test_engines.sh \
             ${{ matrix.adapter_dir }}/sdk.yaml \
             results/${{ matrix.id }}
+
+      - name: Validate conformance execution
+        run: |
+          python3 - <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          path = Path("results/${{ matrix.id }}/conformance_summary.json")
+          if not path.exists():
+              print(f"Missing conformance summary: {path}", file=sys.stderr)
+              sys.exit(1)
+
+          data = json.loads(path.read_text(encoding="utf-8"))
+          if data.get("failure_state") == "execution_failed":
+              print("Conformance execution failed (command/parsing error).", file=sys.stderr)
+              sys.exit(1)
+          print("Conformance execution summary OK.")
+          PY
 
       - name: Run k6 scenario benchmarks
         run: |

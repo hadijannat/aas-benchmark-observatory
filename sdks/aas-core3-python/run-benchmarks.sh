@@ -13,7 +13,7 @@ DATASETS_DIR="$(cd "$DATASETS_DIR" && pwd)"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 
 # Install dependencies
-pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
+pip install --quiet -r "$SCRIPT_DIR/requirements.txt" -c "$SCRIPT_DIR/constraints.txt"
 
 # Temp file for pytest-benchmark JSON output
 BENCH_JSON="$(mktemp)"

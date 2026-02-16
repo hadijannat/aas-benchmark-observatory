@@ -16,8 +16,8 @@ export OUTPUT_DIR
 
 cd "$SCRIPT_DIR"
 
-# Download Go module dependencies and generate go.sum
-go mod tidy
+# Download pinned module dependencies from go.mod/go.sum
+go mod download
 
 # Run Go benchmarks with JSON output
 # -count=5 for statistical significance, -benchmem for allocation stats

@@ -114,13 +114,22 @@ public class PipelineBenchmarks {
     public int update() {
         if (env == null) return 0;
         int count = 0;
+        List<IProperty> touched = new ArrayList<>();
+        List<String> originals = new ArrayList<>();
         for (IClass node : env.descend()) {
             if (node instanceof IProperty prop) {
                 if (prop.getValue().isPresent()) {
-                    prop.setValue(prop.getValue().get() + "_updated");
+                    String original = prop.getValue().get();
+                    prop.setValue(original + "_updated");
+                    touched.add(prop);
+                    originals.add(original);
                     count++;
                 }
             }
+        }
+        // Restore baseline state so each JMH sample starts from identical data.
+        for (int i = 0; i < touched.size(); i++) {
+            touched.get(i).setValue(originals.get(i));
         }
         return count;
     }

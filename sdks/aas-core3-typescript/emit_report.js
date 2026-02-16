@@ -15,11 +15,36 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const CORE_DATASETS = new Set(["wide", "deep", "mixed"]);
+const CORE_OPERATIONS = new Set(["deserialize", "validate", "traverse", "update", "serialize"]);
+const XML_OPERATIONS = new Set(["deserialize_xml", "serialize_xml"]);
+const AASX_OPERATIONS = new Set(["aasx_extract", "aasx_repackage"]);
+
 function msToNs(ms) {
   if (ms === null || ms === undefined) {
     return null;
   }
   return Math.round(ms * 1e6);
+}
+
+function normalizeOperationId(operation) {
+  const lower = operation.toLowerCase();
+  const map = {
+    deserializexml: "deserialize_xml",
+    serializexml: "serialize_xml",
+    aasxextract: "aasx_extract",
+    aasxrepackage: "aasx_repackage",
+  };
+  if (map[lower]) return map[lower];
+  return operation;
+}
+
+function inferOperationTrack(dataset, operationId) {
+  if (XML_OPERATIONS.has(operationId)) return "xml";
+  if (AASX_OPERATIONS.has(operationId)) return "aasx";
+  if (dataset.startsWith("val_") && operationId === "validate") return "validation";
+  if (CORE_DATASETS.has(dataset) && CORE_OPERATIONS.has(operationId)) return "core";
+  return "capability";
 }
 
 function main() {
@@ -74,7 +99,13 @@ function main() {
           : null;
     }
 
-    datasets[dsName].operations[result.operation] = {
+    const operationId = normalizeOperationId(result.operation);
+    datasets[dsName].operations[operationId] = {
+      operation_id: operationId,
+      operation_track: inferOperationTrack(dsName, operationId),
+      sample_count: result.sampleCount || 0,
+      measurement_semantics: "mean_ns_per_operation",
+      failure_state: "ok",
       iterations: result.iterations || 0,
       mean_ns: meanNs,
       median_ns: msToNs(result.medianMs),

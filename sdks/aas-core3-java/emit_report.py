@@ -21,6 +21,35 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+CORE_DATASETS = {"wide", "deep", "mixed"}
+CORE_OPERATIONS = {"deserialize", "validate", "traverse", "update", "serialize"}
+
+
+def canonical_operation_id(operation: str) -> str:
+    """Map harness-specific operation names to canonical snake_case IDs."""
+    mapping = {
+        "deserializeXml": "deserialize_xml",
+        "serializeXml": "serialize_xml",
+        "aasxExtract": "aasx_extract",
+        "aasxRepackage": "aasx_repackage",
+    }
+    if operation in mapping:
+        return mapping[operation]
+    return operation
+
+
+def infer_operation_track(dataset: str, operation_id: str) -> str:
+    """Classify operation into the core track or capability tracks."""
+    if operation_id in {"deserialize_xml", "serialize_xml"}:
+        return "xml"
+    if operation_id in {"aasx_extract", "aasx_repackage"}:
+        return "aasx"
+    if dataset.startswith("val_") and operation_id == "validate":
+        return "validation"
+    if dataset in CORE_DATASETS and operation_id in CORE_OPERATIONS:
+        return "core"
+    return "capability"
+
 
 def _extract_gc_metrics(result):
     """Extract GC profiler metrics from JMH secondaryMetrics.
@@ -79,7 +108,7 @@ def main():
     for result in jmh_results:
         # JMH benchmark name format: com.aas.benchmark.PipelineBenchmarks.operation
         benchmark_name = result["benchmark"]
-        operation = benchmark_name.rsplit(".", 1)[-1]
+        operation = canonical_operation_id(benchmark_name.rsplit(".", 1)[-1])
 
         params = result.get("params", {})
 
@@ -139,6 +168,11 @@ def main():
         gc_metrics = _extract_gc_metrics(result)
 
         datasets[ds_name]["operations"][operation] = {
+            "operation_id": operation,
+            "operation_track": infer_operation_track(ds_name, operation),
+            "sample_count": iterations,
+            "measurement_semantics": "mean_ns_per_operation",
+            "failure_state": "ok",
             "iterations": iterations,
             "mean_ns": mean_ns,
             "median_ns": median_ns,

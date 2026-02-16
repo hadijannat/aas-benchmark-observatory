@@ -12,6 +12,11 @@ import platform
 import sys
 from datetime import datetime, timezone
 
+CORE_DATASETS = {"wide", "deep", "mixed"}
+CORE_OPERATIONS = {"deserialize", "validate", "traverse", "update", "serialize"}
+XML_OPERATIONS = {"deserialize_xml", "serialize_xml"}
+AASX_OPERATIONS = {"aasx_extract", "aasx_repackage"}
+
 
 def parse_benchmark_name(name):
     """Parse test name like 'test_deserialize[wide]' into (operation, dataset).
@@ -39,10 +44,24 @@ def seconds_to_ns(s):
     return int(round(s * 1e9))
 
 
-def build_operation_entry(bench):
+def infer_operation_track(dataset, operation_id):
+    """Classify an operation into the core track or capability tracks."""
+    if operation_id in XML_OPERATIONS:
+        return "xml"
+    if operation_id in AASX_OPERATIONS:
+        return "aasx"
+    if dataset.startswith("val_") and operation_id == "validate":
+        return "validation"
+    if dataset in CORE_DATASETS and operation_id in CORE_OPERATIONS:
+        return "core"
+    return "capability"
+
+
+def build_operation_entry(bench, dataset, operation_id):
     """Build an operation dict from a single pytest-benchmark entry."""
     stats = bench.get("stats", {})
     iterations = stats.get("iterations", 0) * stats.get("rounds", 1)
+    sample_count = stats.get("rounds", 0)
 
     mean_ns = seconds_to_ns(stats.get("mean", 0))
     median_ns = seconds_to_ns(stats.get("median", 0))
@@ -56,6 +75,11 @@ def build_operation_entry(bench):
         throughput = 1.0 / mean_s
 
     return {
+        "operation_id": operation_id,
+        "operation_track": infer_operation_track(dataset, operation_id),
+        "sample_count": int(sample_count) if sample_count else 0,
+        "measurement_semantics": "mean_ns_per_operation",
+        "failure_state": "ok",
         "iterations": iterations,
         "mean_ns": mean_ns,
         "median_ns": median_ns,
@@ -119,7 +143,7 @@ def main():
         if dataset not in datasets:
             datasets[dataset] = {"operations": {}}
 
-        op_entry = build_operation_entry(bench)
+        op_entry = build_operation_entry(bench, dataset, operation)
 
         # Attach memory data if available
         mem_key = f"{dataset}/{operation}"

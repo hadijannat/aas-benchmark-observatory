@@ -15,8 +15,11 @@ export DATASETS_DIR
 
 cd "$SCRIPT_DIR"
 
-# Run criterion benchmarks with JSON output
-cargo bench --bench pipeline -- --output-format=json 2>/dev/null | tee "$OUTPUT_DIR/criterion_raw.json" || true
+# Avoid stale criterion outputs from previous runs.
+rm -rf "$SCRIPT_DIR/target/criterion"
+
+# Run criterion benchmarks and capture a raw log.
+cargo bench --locked --bench pipeline 2>&1 | tee "$OUTPUT_DIR/criterion_raw.log"
 
 # Convert criterion output to report.json
 python3 "$SCRIPT_DIR/emit_report.py" \

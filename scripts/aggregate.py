@@ -13,6 +13,7 @@ Regression detection (SRQ-5):
 import argparse
 import json
 import math
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,6 +24,8 @@ DEFAULT_KNOWN_SDKS = REPO_ROOT / "known-sdks.json"
 
 REGRESSION_THRESHOLD_PCT = 5.0
 Z_95 = 1.96
+CORE_DATASETS = {"wide", "deep", "mixed"}
+CORE_OPERATIONS = {"deserialize", "validate", "traverse", "update", "serialize"}
 
 
 def read_json(path: Path):
@@ -34,6 +37,137 @@ def read_json(path: Path):
         return None
 
 
+def canonical_operation_id(raw_op: str) -> str:
+    """Normalize legacy operation names to canonical snake_case operation IDs."""
+    explicit = {
+        "deserializeXml": "deserialize_xml",
+        "serializeXml": "serialize_xml",
+        "deserializexml": "deserialize_xml",
+        "serializexml": "serialize_xml",
+        "aasxExtract": "aasx_extract",
+        "aasxRepackage": "aasx_repackage",
+        "aasxextract": "aasx_extract",
+        "aasxrepackage": "aasx_repackage",
+    }
+    if raw_op in explicit:
+        return explicit[raw_op]
+
+    # Camel/Pascal-case -> snake_case
+    snake = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", raw_op)
+    snake = snake.replace("-", "_").lower()
+
+    # Preserve already-canonical IDs and map dense legacy forms.
+    dense_map = {
+        "deserializexml": "deserialize_xml",
+        "serializexml": "serialize_xml",
+        "aasxextract": "aasx_extract",
+        "aasxrepackage": "aasx_repackage",
+    }
+    return dense_map.get(snake, snake)
+
+
+def infer_operation_track(dataset_name: str, operation_id: str) -> str:
+    """Infer operation track for two-track+capability visualization."""
+    if operation_id in {"deserialize_xml", "serialize_xml"}:
+        return "xml"
+    if operation_id in {"aasx_extract", "aasx_repackage"}:
+        return "aasx"
+    if dataset_name.startswith("val_") and operation_id == "validate":
+        return "validation"
+    if dataset_name in CORE_DATASETS and operation_id in CORE_OPERATIONS:
+        return "core"
+    return "capability"
+
+
+def normalize_pipeline_report(report: dict) -> tuple[dict, dict[str, str]]:
+    """Normalize operation IDs and add non-breaking schema defaults."""
+    datasets = report.get("datasets", {})
+    op_name_map: dict[str, str] = {}
+
+    if not isinstance(datasets, dict):
+        return report, op_name_map
+
+    for ds_name, ds_data in datasets.items():
+        if not isinstance(ds_data, dict):
+            continue
+
+        ops = ds_data.get("operations", {})
+        if not isinstance(ops, dict):
+            continue
+
+        normalized_ops: dict[str, dict] = {}
+        for raw_op, op_data in ops.items():
+            if not isinstance(op_data, dict):
+                continue
+
+            op_id = op_data.get("operation_id") or canonical_operation_id(raw_op)
+            op_data["operation_id"] = op_id
+            op_data.setdefault("operation_track", infer_operation_track(ds_name, op_id))
+            op_data.setdefault("measurement_semantics", "mean_ns_per_operation")
+            op_data.setdefault("failure_state", "ok")
+
+            sample_count = op_data.get("sample_count")
+            if sample_count is None:
+                # Backward-compatible fallback for legacy reports.
+                sample_count = op_data.get("iterations", 0)
+            op_data["sample_count"] = int(sample_count or 0)
+
+            existing = normalized_ops.get(op_id)
+            if existing is None or op_data["sample_count"] > int(existing.get("sample_count", 0)):
+                normalized_ops[op_id] = op_data
+
+            if raw_op != op_id:
+                op_name_map[raw_op] = op_id
+
+        ds_data["operations"] = normalized_ops
+
+    if op_name_map:
+        merged = dict(report.get("operation_name_map", {}))
+        merged.update(op_name_map)
+        report["operation_name_map"] = merged
+
+    return report, op_name_map
+
+
+def derive_capabilities(report: dict) -> tuple[dict[str, bool], bool]:
+    """Derive capability flags and strict core-track eligibility."""
+    capabilities = {
+        "core": False,
+        "xml": False,
+        "aasx": False,
+        "validation": False,
+    }
+    datasets = report.get("datasets", {})
+    if not isinstance(datasets, dict):
+        return capabilities, False
+
+    core_track_eligible = True
+
+    for ds in CORE_DATASETS:
+        ds_ops = datasets.get(ds, {}).get("operations", {})
+        if not isinstance(ds_ops, dict) or not CORE_OPERATIONS.issubset(set(ds_ops.keys())):
+            core_track_eligible = False
+            break
+
+    for ds_name, ds_data in datasets.items():
+        if not isinstance(ds_data, dict):
+            continue
+        ops = ds_data.get("operations", {})
+        if not isinstance(ops, dict):
+            continue
+        for op_id in ops:
+            if op_id in CORE_OPERATIONS and ds_name in CORE_DATASETS:
+                capabilities["core"] = True
+            elif op_id in {"deserialize_xml", "serialize_xml"}:
+                capabilities["xml"] = True
+            elif op_id in {"aasx_extract", "aasx_repackage"}:
+                capabilities["aasx"] = True
+            elif ds_name.startswith("val_") and op_id == "validate":
+                capabilities["validation"] = True
+
+    return capabilities, core_track_eligible
+
+
 # ── SDK (library) benchmarks ────────────────────────────────────────────
 
 
@@ -43,10 +177,18 @@ def _build_sdk_entry(entry: Path, names: dict[str, str]) -> dict | None:
     if report is None:
         return None
 
+    report, op_name_map = normalize_pipeline_report(report)
+
     sdk_id = report.get("sdk_id", entry.name)
     name = names.get(sdk_id, report.get("metadata", {}).get("name", sdk_id))
+    capabilities, core_track_eligible = derive_capabilities(report)
 
-    result: dict = {"id": sdk_id, "name": name}
+    result: dict = {
+        "id": sdk_id,
+        "name": name,
+        "capabilities": capabilities,
+        "core_track_eligible": core_track_eligible,
+    }
 
     env = read_json(entry / "env.json")
     if env:
@@ -55,6 +197,8 @@ def _build_sdk_entry(entry: Path, names: dict[str, str]) -> dict | None:
     # Store the full report (including metadata + datasets) so the dashboard
     # can display language, runtime version, harness, and package version.
     result["pipeline"] = report
+    if op_name_map:
+        result["operation_name_map"] = op_name_map
 
     return result
 
@@ -127,6 +271,8 @@ def _compute_regressions(
             prev_stddev = prev_op.get("stddev_ns")
             curr_n = curr_op.get("iterations", 0)
             prev_n = prev_op.get("iterations", 0)
+            curr_n = curr_op.get("sample_count", curr_n)
+            prev_n = prev_op.get("sample_count", prev_n)
 
             if (
                 curr_mean is None or prev_mean is None
@@ -179,6 +325,10 @@ def _build_previous_index(previous_data: dict) -> dict[str, dict]:
     """Build sdk_id -> SDK entry map from previous results.json."""
     index: dict[str, dict] = {}
     for sdk in previous_data.get("sdk_benchmarks", []):
+        pipeline = sdk.get("pipeline")
+        if isinstance(pipeline, dict):
+            normalized, _ = normalize_pipeline_report(pipeline)
+            sdk["pipeline"] = normalized
         sdk_id = sdk.get("id", "")
         if sdk_id:
             index[sdk_id] = sdk

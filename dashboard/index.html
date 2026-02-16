@@ -286,6 +286,75 @@
     const VAL_DATASETS = ['val_regex', 'val_cardinality', 'val_referential'];
     const AASX_DATASETS = ['aasx_small', 'aasx_medium'];
 
+    function canonicalOperationId(op) {
+      const explicit = {
+        deserializeXml: 'deserialize_xml',
+        serializeXml: 'serialize_xml',
+        deserializexml: 'deserialize_xml',
+        serializexml: 'serialize_xml',
+        aasxExtract: 'aasx_extract',
+        aasxRepackage: 'aasx_repackage',
+        aasxextract: 'aasx_extract',
+        aasxrepackage: 'aasx_repackage',
+      };
+      if (explicit[op]) return explicit[op];
+      return String(op || '')
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .replace(/-/g, '_')
+        .toLowerCase();
+    }
+
+    function inferTrack(dataset, operationId) {
+      if (XML_OPS.includes(operationId)) return 'xml';
+      if (AASX_OPS.includes(operationId)) return 'aasx';
+      if (dataset.startsWith('val_') && operationId === 'validate') return 'validation';
+      if (CORE_DATASETS.includes(dataset) && CORE_OPS.includes(operationId)) return 'core';
+      return 'capability';
+    }
+
+    function normalizeSdkEntry(sdk) {
+      const report = sdk?.pipeline;
+      if (!report?.datasets) return sdk;
+
+      const opNameMap = { ...(sdk.operation_name_map || {}) };
+      const capabilities = { ...(sdk.capabilities || { core: false, xml: false, aasx: false, validation: false }) };
+
+      for (const [dataset, dsData] of Object.entries(report.datasets || {})) {
+        const operations = dsData?.operations || {};
+        const normalized = {};
+        for (const [rawOp, rawEntry] of Object.entries(operations)) {
+          const entry = (rawEntry && typeof rawEntry === 'object') ? { ...rawEntry } : {};
+          const opId = entry.operation_id || canonicalOperationId(rawOp);
+          entry.operation_id = opId;
+          entry.operation_track = entry.operation_track || inferTrack(dataset, opId);
+          if (entry.sample_count == null) {
+            entry.sample_count = Number(entry.iterations || 0);
+          }
+          if (!entry.measurement_semantics) entry.measurement_semantics = 'mean_ns_per_operation';
+          if (!entry.failure_state) entry.failure_state = 'ok';
+          normalized[opId] = entry;
+          if (rawOp !== opId) opNameMap[rawOp] = opId;
+
+          if (CORE_DATASETS.includes(dataset) && CORE_OPS.includes(opId)) capabilities.core = true;
+          if (XML_OPS.includes(opId)) capabilities.xml = true;
+          if (AASX_OPS.includes(opId)) capabilities.aasx = true;
+          if (dataset.startsWith('val_') && opId === 'validate') capabilities.validation = true;
+        }
+        dsData.operations = normalized;
+      }
+
+      const datasets = report.datasets || {};
+      const isCoreEligible = CORE_DATASETS.every(ds => {
+        const ops = datasets[ds]?.operations || {};
+        return CORE_OPS.every(op => ops[op]);
+      });
+
+      sdk.operation_name_map = opNameMap;
+      sdk.capabilities = capabilities;
+      if (sdk.core_track_eligible == null) sdk.core_track_eligible = isCoreEligible;
+      return sdk;
+    }
+
     // ── Helpers ───────────────────────────────────────────
     function esc(s) {
       const d = document.createElement('div');
@@ -382,7 +451,7 @@
     }
 
     // ── SDK Timing sub-tab ────────────────────────────────
-    function buildSdkComparisonTable(dataset, sdkResults, regLookup) {
+    function buildSdkComparisonTable(dataset, sdkResults, regLookup, coreOnly = false) {
       const entries = sdkResults
         .filter(s => s.pipeline?.datasets?.[dataset])
         .map(s => ({ id: s.id, name: s.name, lang: s.pipeline.metadata?.language, data: s.pipeline.datasets[dataset] }));
@@ -423,9 +492,14 @@
       for (const e of entries) {
         for (const op of Object.keys(e.data.operations || {})) opSet.add(op);
       }
-      const allKnown = [...CORE_OPS, ...XML_OPS, ...AASX_OPS];
-      const ops = allKnown.filter(op => opSet.has(op));
-      for (const op of opSet) { if (!ops.includes(op)) ops.push(op); }
+      let ops = [];
+      if (coreOnly) {
+        ops = CORE_OPS.filter(op => opSet.has(op));
+      } else {
+        const allKnown = [...CORE_OPS, ...XML_OPS, ...AASX_OPS];
+        ops = allKnown.filter(op => opSet.has(op));
+        for (const op of opSet) { if (!ops.includes(op)) ops.push(op); }
+      }
 
       const tbody = document.createElement('tbody');
       for (const op of ops) {
@@ -560,11 +634,32 @@
         return;
       }
 
-      const regLookup = buildRegressionLookup(sdkResults);
+      const intro = document.createElement('p');
+      intro.style.cssText = 'color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.25rem;';
+      intro.textContent = 'Core track compares only SDKs that fully implement the canonical pipeline (deserialize, validate, traverse, update, serialize) on wide/deep/mixed datasets.';
+      container.appendChild(intro);
 
-      for (const ds of CORE_DATASETS) {
-        const table = buildSdkComparisonTable(ds, sdkResults, regLookup);
-        if (table) container.appendChild(table);
+      const regLookup = buildRegressionLookup(sdkResults);
+      const coreSdkResults = sdkResults.filter(s => s.core_track_eligible);
+
+      if (coreSdkResults.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No SDK currently qualifies for the core track.';
+        container.appendChild(empty);
+      } else {
+        for (const ds of CORE_DATASETS) {
+          const table = buildSdkComparisonTable(ds, coreSdkResults, regLookup, true);
+          if (table) container.appendChild(table);
+        }
+      }
+
+      const capabilityOnly = sdkResults.filter(s => !s.core_track_eligible).map(s => s.name);
+      if (capabilityOnly.length > 0) {
+        const note = document.createElement('p');
+        note.style.cssText = 'color: var(--text-muted); font-size: 0.8rem; margin: 0.75rem 0 0;';
+        note.textContent = 'Excluded from core track (capability-only): ' + capabilityOnly.join(', ');
+        container.appendChild(note);
       }
 
       const detailTitle = document.createElement('div');
@@ -799,6 +894,79 @@
       container.appendChild(section);
     }
 
+    // ── SDK XML sub-tab ───────────────────────────────────
+    function renderXmlSubtab(container, sdkResults) {
+      if (!sdkResults || sdkResults.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No XML benchmark data available yet.';
+        container.appendChild(empty);
+        return;
+      }
+
+      const entries = sdkResults.filter(s => {
+        const ds = s.pipeline?.datasets;
+        if (!ds) return false;
+        return CORE_DATASETS.some(cd => ds[cd] && Object.keys(ds[cd].operations || {}).some(op => XML_OPS.includes(op)));
+      }).map(s => ({ id: s.id, name: s.name, datasets: s.pipeline.datasets }));
+
+      if (entries.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No SDKs currently report XML operations.';
+        container.appendChild(empty);
+        return;
+      }
+
+      const desc = document.createElement('p');
+      desc.style.cssText = 'color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;';
+      desc.textContent = 'XML capability track for SDKs that implement deserialize_xml and serialize_xml.';
+      container.appendChild(desc);
+
+      for (const ds of CORE_DATASETS) {
+        const section = document.createElement('div');
+        section.className = 'dataset-section';
+        const h3 = document.createElement('h3');
+        h3.textContent = ds.charAt(0).toUpperCase() + ds.slice(1) + ' Dataset';
+        section.appendChild(h3);
+
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        const headRow = document.createElement('tr');
+        const headers = ['Operation', ...entries.map(e => e.name)];
+        for (const h of headers) {
+          const th = document.createElement('th');
+          th.textContent = h;
+          headRow.appendChild(th);
+        }
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        let hasData = false;
+        for (const op of XML_OPS) {
+          const tr = document.createElement('tr');
+          const tdOp = document.createElement('td');
+          tdOp.textContent = op;
+          tr.appendChild(tdOp);
+          for (const entry of entries) {
+            const td = document.createElement('td');
+            const opData = entry.datasets?.[ds]?.operations?.[op];
+            td.textContent = fmtNs(opData?.mean_ns);
+            if (opData?.mean_ns != null) hasData = true;
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+
+        if (hasData) {
+          table.appendChild(tbody);
+          section.appendChild(table);
+          container.appendChild(section);
+        }
+      }
+    }
+
     // ── SDK AASX sub-tab ──────────────────────────────────
     function renderAasxSubtab(container, sdkResults) {
       if (!sdkResults || sdkResults.length === 0) {
@@ -970,9 +1138,10 @@
       const subBar = document.createElement('div');
       subBar.className = 'sub-tab-bar';
       const subTabs = [
-        { id: 'subtab-timing', label: 'Timing' },
+        { id: 'subtab-timing', label: 'Core Track' },
         { id: 'subtab-memory', label: 'Memory' },
         { id: 'subtab-validation', label: 'Validation' },
+        { id: 'subtab-xml', label: 'XML' },
         { id: 'subtab-aasx', label: 'AASX' },
         { id: 'subtab-regressions', label: 'Regressions' },
       ];
@@ -1003,6 +1172,12 @@
       renderValidationSubtab(validationContent, sdkResults);
       container.appendChild(validationContent);
 
+      const xmlContent = document.createElement('div');
+      xmlContent.id = 'subtab-xml';
+      xmlContent.className = 'sub-tab-content';
+      renderXmlSubtab(xmlContent, sdkResults);
+      container.appendChild(xmlContent);
+
       const aasxContent = document.createElement('div');
       aasxContent.id = 'subtab-aasx';
       aasxContent.className = 'sub-tab-content';
@@ -1019,6 +1194,9 @@
     // ── Server API Benchmarks tab ─────────────────────────
     function getConformanceStatus(conf) {
       if (!conf) return { cls: 'na', label: 'No data' };
+      if (conf.failure_state === 'execution_failed') {
+        return { cls: 'fail', label: 'Execution failed' };
+      }
       const passed = conf.checks_passed ?? 0;
       const total = conf.checks_total ?? 0;
       if (total === 0) return { cls: 'na', label: 'No checks' };
@@ -1065,7 +1243,10 @@
           td3.textContent = rTotal > 0 ? rPassed + '/' + rTotal : '\u2014';
           const td4 = document.createElement('td');
           const badge = document.createElement('span');
-          if (rTotal === 0) {
+          if (r.failure_state && r.failure_state !== 'ok') {
+            badge.className = 'badge badge-fail';
+            badge.textContent = r.failure_state;
+          } else if (rTotal === 0) {
             badge.className = 'badge badge-na';
             badge.textContent = 'N/A';
           } else if (rPassed === rTotal) {
@@ -1142,6 +1323,8 @@
       const table = document.createElement('table');
       const tbody = document.createElement('tbody');
       const rows = [
+        ['Runner Fingerprint', env.runner_fingerprint || '\u2014'],
+        ['CPU Model', env.cpu_model || '\u2014'],
         ['CPU', (env.cpu_count || '\u2014') + ' cores'],
         ['Memory', (env.total_memory_mb || '\u2014') + ' MB'],
         ['Docker', env.docker_version || '\u2014'],
@@ -1217,7 +1400,7 @@
         if (s.pipeline && !s.pipeline.datasets && !s.pipeline.schema_version) {
           s.pipeline = { datasets: s.pipeline, metadata: {} };
         }
-        return s;
+        return normalizeSdkEntry(s);
       });
       const serverResults = data.server_benchmarks || data.sdks || [];
 

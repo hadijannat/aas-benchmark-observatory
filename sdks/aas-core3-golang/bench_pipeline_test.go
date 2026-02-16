@@ -19,11 +19,11 @@ import (
 
 // memorySnapshot captures a single ReadMemStats measurement.
 type memorySnapshot struct {
-	HeapAllocBytes uint64 `json:"heap_alloc_bytes"`
-	HeapSysBytes   uint64 `json:"heap_sys_bytes"`
+	HeapAllocBytes  uint64 `json:"heap_alloc_bytes"`
+	HeapSysBytes    uint64 `json:"heap_sys_bytes"`
 	TotalAllocBytes uint64 `json:"total_alloc_bytes"`
-	NumGC          uint32 `json:"num_gc"`
-	PauseTotalNs   uint64 `json:"pause_total_ns"`
+	NumGC           uint32 `json:"num_gc"`
+	PauseTotalNs    uint64 `json:"pause_total_ns"`
 }
 
 // memoryStatsFile is the schema written to memory_stats.json.
@@ -268,18 +268,29 @@ func BenchmarkUpdate(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
+				touchedProps := make([]aastypes.IProperty, 0, 128)
+				originalVals := make([]string, 0, 128)
 				count := 0
 				env.Descend(func(node aastypes.IClass) bool {
 					if prop, ok := node.(aastypes.IProperty); ok {
 						val := prop.Value()
 						if val != nil {
-							updated := *val + "_updated"
+							original := *val
+							updated := original + "_updated"
 							prop.SetValue(&updated)
+							touchedProps = append(touchedProps, prop)
+							originalVals = append(originalVals, original)
 							count++
 						}
 					}
 					return false // continue descending
 				})
+
+				// Restore baseline state so every iteration starts identically.
+				for idx, prop := range touchedProps {
+					original := originalVals[idx]
+					prop.SetValue(&original)
+				}
 				_ = count
 			}
 		})

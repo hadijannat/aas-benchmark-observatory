@@ -37,6 +37,7 @@ except: print('0 0')
 
 TOTAL_CHECKS_PASSED=0
 TOTAL_CHECKS_FAILED=0
+EXECUTION_FAILURES=0
 RESULTS="["
 
 for (( i=0; i<PROFILE_COUNT; i++ )); do
@@ -46,31 +47,70 @@ for (( i=0; i<PROFILE_COUNT; i++ )); do
 
   printf "Running conformance test %d/%d: %s (%s)\n" "$((i+1))" "$PROFILE_COUNT" "$SUITE" "$PROFILE_DESC"
 
+  CMD_STATUS=0
   aas_test_engines check_server \
     --output json \
     "$API_BASE_URL" "$SUITE" \
-    > "$OUTFILE" 2>&1 || true
+    > "$OUTFILE" 2>&1 || CMD_STATUS=$?
+
+  JSON_PARSE_OK=0
+  if python3 - "$OUTFILE" <<'PY'
+import json
+import sys
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as f:
+        json.load(f)
+except Exception:
+    sys.exit(1)
+sys.exit(0)
+PY
+  then
+    JSON_PARSE_OK=1
+  fi
 
   # Parse actual check counts from output
-  read -r CHECKS_PASSED CHECKS_FAILED <<< "$(count_checks "$OUTFILE")"
+  CHECKS_PASSED=0
+  CHECKS_FAILED=0
+  if [ "$JSON_PARSE_OK" -eq 1 ]; then
+    read -r CHECKS_PASSED CHECKS_FAILED <<< "$(count_checks "$OUTFILE")"
+  fi
+
+  PROFILE_FAILURE_STATE="ok"
+  if [ "$CMD_STATUS" -ne 0 ]; then
+    PROFILE_FAILURE_STATE="execution_failed"
+    EXECUTION_FAILURES=$((EXECUTION_FAILURES + 1))
+  elif [ "$JSON_PARSE_OK" -ne 1 ]; then
+    PROFILE_FAILURE_STATE="parse_failed"
+    EXECUTION_FAILURES=$((EXECUTION_FAILURES + 1))
+  fi
+
   TOTAL_CHECKS_PASSED=$((TOTAL_CHECKS_PASSED + CHECKS_PASSED))
   TOTAL_CHECKS_FAILED=$((TOTAL_CHECKS_FAILED + CHECKS_FAILED))
   TOTAL=$((CHECKS_PASSED + CHECKS_FAILED))
 
-  printf "  Profile result: %d/%d checks passed\n" "$CHECKS_PASSED" "$TOTAL"
+  printf "  Profile result: %d/%d checks passed (state=%s)\n" "$CHECKS_PASSED" "$TOTAL" "$PROFILE_FAILURE_STATE"
 
   if [ "$i" -gt 0 ]; then
     RESULTS="${RESULTS},"
   fi
-  RESULTS="${RESULTS}{\"index\":${i},\"suite\":\"${SUITE}\",\"description\":\"${PROFILE_DESC}\",\"checks_passed\":${CHECKS_PASSED},\"checks_failed\":${CHECKS_FAILED},\"checks_total\":${TOTAL},\"output_file\":\"conformance_${i}.json\"}"
+  RESULTS="${RESULTS}{\"index\":${i},\"suite\":\"${SUITE}\",\"description\":\"${PROFILE_DESC}\",\"checks_passed\":${CHECKS_PASSED},\"checks_failed\":${CHECKS_FAILED},\"checks_total\":${TOTAL},\"failure_state\":\"${PROFILE_FAILURE_STATE}\",\"output_file\":\"conformance_${i}.json\"}"
 done
 
 RESULTS="${RESULTS}]"
 GRAND_TOTAL=$((TOTAL_CHECKS_PASSED + TOTAL_CHECKS_FAILED))
+SUMMARY_FAILURE_STATE="ok"
+if [ "$EXECUTION_FAILURES" -gt 0 ]; then
+  SUMMARY_FAILURE_STATE="execution_failed"
+fi
 
-printf '{"sdk_id":"%s","total_profiles":%d,"checks_passed":%d,"checks_failed":%d,"checks_total":%d,"results":%s}\n' \
-  "$SDK_ID" "$PROFILE_COUNT" "$TOTAL_CHECKS_PASSED" "$TOTAL_CHECKS_FAILED" "$GRAND_TOTAL" "$RESULTS" \
+printf '{"sdk_id":"%s","total_profiles":%d,"checks_passed":%d,"checks_failed":%d,"checks_total":%d,"execution_failures":%d,"failure_state":"%s","results":%s}\n' \
+  "$SDK_ID" "$PROFILE_COUNT" "$TOTAL_CHECKS_PASSED" "$TOTAL_CHECKS_FAILED" "$GRAND_TOTAL" "$EXECUTION_FAILURES" "$SUMMARY_FAILURE_STATE" "$RESULTS" \
   > "$OUTPUT_DIR/conformance_summary.json"
 
 echo "Conformance summary written to $OUTPUT_DIR/conformance_summary.json"
 printf "Overall: %d/%d checks passed across %d profiles\n" "$TOTAL_CHECKS_PASSED" "$GRAND_TOTAL" "$PROFILE_COUNT"
+
+if [ "$EXECUTION_FAILURES" -gt 0 ]; then
+  echo "Conformance execution failures detected: $EXECUTION_FAILURES" >&2
+  exit 2
+fi

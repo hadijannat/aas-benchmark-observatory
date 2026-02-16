@@ -80,13 +80,21 @@ public class PipelineBenchmarks
     public int Update()
     {
         int count = 0;
+        var touched = new List<(Aas.IProperty Prop, string Original)>();
         foreach (var node in _env!.Descend())
         {
             if (node is Aas.IProperty prop && prop.Value != null)
             {
-                prop.Value = prop.Value + "_updated";
+                var original = prop.Value;
+                prop.Value = original + "_updated";
+                touched.Add((prop, original));
                 count++;
             }
+        }
+        // Restore baseline state so each benchmark sample starts from identical input.
+        foreach (var item in touched)
+        {
+            item.Prop.Value = item.Original;
         }
         return count;
     }

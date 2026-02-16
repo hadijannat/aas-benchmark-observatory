@@ -24,8 +24,25 @@ fn get_dataset_files() -> Vec<(String, String)> {
     datasets
 }
 
+fn get_parseable_dataset_files() -> Vec<(String, String)> {
+    let mut parseable = Vec::new();
+    for (name, content) in get_dataset_files() {
+        match serde_json::from_str::<Environment>(&content) {
+            Ok(_) => parseable.push((name, content)),
+            Err(err) => {
+                eprintln!("Skipping dataset {name}: unsupported by basyx-rs parser ({err})");
+            }
+        }
+    }
+    assert!(
+        !parseable.is_empty(),
+        "No parseable datasets found for basyx-rs in DATASETS_DIR"
+    );
+    parseable
+}
+
 fn bench_deserialize(c: &mut Criterion) {
-    let datasets = get_dataset_files();
+    let datasets = get_parseable_dataset_files();
     let mut group = c.benchmark_group("deserialize");
     for (name, json_str) in &datasets {
         group.bench_function(name, |b| {
@@ -39,10 +56,11 @@ fn bench_deserialize(c: &mut Criterion) {
 }
 
 fn bench_serialize(c: &mut Criterion) {
-    let datasets = get_dataset_files();
+    let datasets = get_parseable_dataset_files();
     let mut group = c.benchmark_group("serialize");
     for (name, json_str) in &datasets {
-        let env: Environment = serde_json::from_str(json_str).unwrap();
+        let env: Environment =
+            serde_json::from_str(json_str).expect("dataset pre-validated to deserialize");
         group.bench_function(name, |b| {
             b.iter(|| {
                 let output = serde_json::to_string(&env).unwrap();

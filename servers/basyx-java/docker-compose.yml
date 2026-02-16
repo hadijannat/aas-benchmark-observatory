@@ -1,6 +1,6 @@
 services:
   aas-env:
-    image: eclipsebasyx/aas-environment:2.0.0-SNAPSHOT
+    image: eclipsebasyx/aas-environment:2.0.0-SNAPSHOT-273887a
     ports:
       - "8081:8081"
     depends_on:
