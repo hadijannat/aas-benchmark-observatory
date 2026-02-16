@@ -38,7 +38,7 @@
       "package": "@aas-core-works/aas-core3.0-typescript",
       "adapter_dir": "sdks/aas-core3-typescript",
       "enabled": true,
-      "capabilities": { "xml": true, "aasx": false }
+      "capabilities": { "xml": false, "aasx": false }
     },
     {
       "id": "aas-core3-java",

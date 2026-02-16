@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -125,14 +126,16 @@ func deserializeEnv(raw []byte) (aastypes.IEnvironment, error) {
 }
 
 // deserializeXmlEnv unmarshals raw XML bytes into an AAS Environment.
-// NOTE: The exact API of aas-core3.0-golang/xmlization needs verification.
-// This assumes aasxml.Unmarshal(reader) returns (IEnvironment, error) or similar.
-// If the API differs, adjust the call accordingly.
 func deserializeXmlEnv(raw []byte) (aastypes.IEnvironment, error) {
 	reader := bytes.NewReader(raw)
-	env, err := aasxml.Unmarshal[aastypes.IEnvironment](reader)
+	decoder := xml.NewDecoder(reader)
+	instance, err := aasxml.Unmarshal(decoder)
 	if err != nil {
 		return nil, fmt.Errorf("xml unmarshal: %w", err)
+	}
+	env, ok := instance.(aastypes.IEnvironment)
+	if !ok {
+		return nil, fmt.Errorf("xml unmarshal: expected IEnvironment, got %T", instance)
 	}
 	return env, nil
 }
@@ -161,10 +164,6 @@ func BenchmarkDeserialize(b *testing.B) {
 }
 
 // BenchmarkDeserializeXml benchmarks XML -> AAS Environment deserialization.
-// NOTE: Requires aas-core3.0-golang/xmlization package. The exact API
-// (Unmarshal, EnvironmentFromReader, etc.) needs verification against
-// the actual package exports. This implementation assumes a generic
-// Unmarshal[T] function; adjust if the real API differs.
 func BenchmarkDeserializeXml(b *testing.B) {
 	before := captureMemSnapshot()
 	files := datasetXmlFiles(b)
@@ -310,9 +309,6 @@ func BenchmarkSerialize(b *testing.B) {
 }
 
 // BenchmarkSerializeXml benchmarks AAS Environment -> XML serialization.
-// NOTE: The exact xmlization.Marshal API needs verification against the
-// actual aas-core3.0-golang/xmlization package. This assumes Marshal
-// writes to an io.Writer. Adjust if the real API differs.
 func BenchmarkSerializeXml(b *testing.B) {
 	before := captureMemSnapshot()
 	files := datasetXmlFiles(b)
@@ -328,7 +324,8 @@ func BenchmarkSerializeXml(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				var buf bytes.Buffer
-				marshalErr := aasxml.Marshal(&buf, env)
+				encoder := xml.NewEncoder(&buf)
+				marshalErr := aasxml.Marshal(encoder, env, true)
 				if marshalErr != nil {
 					b.Fatal(marshalErr)
 				}

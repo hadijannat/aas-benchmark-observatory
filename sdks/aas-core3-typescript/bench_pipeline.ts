@@ -9,18 +9,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Bench } from "tinybench";
 import * as aasJsonization from "@aas-core-works/aas-core3.0-typescript/jsonization";
-import * as aasXmlization from "@aas-core-works/aas-core3.0-typescript/xmlization";
 import * as aasVerification from "@aas-core-works/aas-core3.0-typescript/verification";
 import * as aasTypes from "@aas-core-works/aas-core3.0-typescript/types";
 
 interface DatasetInfo {
-  name: string;
-  filePath: string;
-  raw: string;
-  fileSizeBytes: number;
-}
-
-interface XmlDatasetInfo {
   name: string;
   filePath: string;
   raw: string;
@@ -70,31 +62,6 @@ function discoverDatasets(): DatasetInfo[] {
     const stat = fs.statSync(filePath);
     return {
       name: path.basename(f, ".json"),
-      filePath,
-      raw,
-      fileSizeBytes: stat.size,
-    };
-  });
-}
-
-function discoverXmlDatasets(): XmlDatasetInfo[] {
-  const datasetsDir = process.env.DATASETS_DIR;
-  if (!datasetsDir) {
-    return [];
-  }
-
-  if (!fs.existsSync(datasetsDir)) {
-    return [];
-  }
-
-  const files = fs.readdirSync(datasetsDir).filter((f) => f.endsWith(".xml")).sort();
-
-  return files.map((f) => {
-    const filePath = path.join(datasetsDir, f);
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const stat = fs.statSync(filePath);
-    return {
-      name: path.basename(f, ".xml"),
       filePath,
       raw,
       fileSizeBytes: stat.size,
@@ -247,48 +214,8 @@ async function runBenchmarksForDataset(dataset: DatasetInfo): Promise<BenchTaskR
   return results;
 }
 
-async function runXmlBenchmarksForDataset(dataset: XmlDatasetInfo): Promise<BenchTaskResult[]> {
-  const results: BenchTaskResult[] = [];
-
-  // Pre-deserialize to obtain an environment for serialize benchmark
-  const environment = aasXmlization.environmentFromStr(dataset.raw);
-
-  // --- Deserialize XML ---
-  const deserializeXmlBench = new Bench({ time: 5000, warmupTime: 1000 });
-  deserializeXmlBench.add("deserialize_xml", () => {
-    aasXmlization.environmentFromStr(dataset.raw);
-  });
-
-  let memBefore = captureMemory();
-  await deserializeXmlBench.run();
-  let memAfter = captureMemory();
-
-  results.push(buildResult(
-    dataset.name, "deserialize_xml", deserializeXmlBench.tasks[0]! as any,
-    buildMemorySnapshot(memBefore, memAfter),
-  ));
-
-  // --- Serialize XML ---
-  const serializeXmlBench = new Bench({ time: 5000, warmupTime: 1000 });
-  serializeXmlBench.add("serialize_xml", () => {
-    aasXmlization.toStr(environment);
-  });
-
-  memBefore = captureMemory();
-  await serializeXmlBench.run();
-  memAfter = captureMemory();
-
-  results.push(buildResult(
-    dataset.name, "serialize_xml", serializeXmlBench.tasks[0]! as any,
-    buildMemorySnapshot(memBefore, memAfter),
-  ));
-
-  return results;
-}
-
 async function main(): Promise<void> {
   const datasets = discoverDatasets();
-  const xmlDatasets = discoverXmlDatasets();
   const allResults: BenchTaskResult[] = [];
 
   // JSON pipeline benchmarks
@@ -298,16 +225,7 @@ async function main(): Promise<void> {
     allResults.push(...results);
   }
 
-  // XML benchmarks (SRQ-1)
-  if (xmlDatasets.length > 0) {
-    for (const dataset of xmlDatasets) {
-      process.stderr.write(`Benchmarking XML dataset: ${dataset.name}\n`);
-      const results = await runXmlBenchmarksForDataset(dataset);
-      allResults.push(...results);
-    }
-  } else {
-    process.stderr.write("No XML datasets found, skipping XML benchmarks\n");
-  }
+  // Note: XML benchmarks skipped — TS SDK does not export xmlization module
 
   // Output all results as JSON to stdout
   process.stdout.write(JSON.stringify(allResults, null, 2) + "\n");
