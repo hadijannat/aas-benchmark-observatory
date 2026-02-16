@@ -125,10 +125,22 @@ func deserializeEnv(raw []byte) (aastypes.IEnvironment, error) {
 	return env, nil
 }
 
+// stripXmlDeclaration removes the <?xml ...?> processing instruction if present,
+// since aasxml.Unmarshal expects the first token to be a StartElement.
+func stripXmlDeclaration(raw []byte) []byte {
+	trimmed := bytes.TrimLeft(raw, " \t\r\n")
+	if bytes.HasPrefix(trimmed, []byte("<?xml")) {
+		if end := bytes.Index(trimmed, []byte("?>")); end >= 0 {
+			trimmed = bytes.TrimLeft(trimmed[end+2:], " \t\r\n")
+		}
+	}
+	return trimmed
+}
+
 // deserializeXmlEnv unmarshals raw XML bytes into an AAS Environment.
 func deserializeXmlEnv(raw []byte) (aastypes.IEnvironment, error) {
-	reader := bytes.NewReader(raw)
-	decoder := xml.NewDecoder(reader)
+	cleaned := stripXmlDeclaration(raw)
+	decoder := xml.NewDecoder(bytes.NewReader(cleaned))
 	instance, err := aasxml.Unmarshal(decoder)
 	if err != nil {
 		return nil, fmt.Errorf("xml unmarshal: %w", err)
