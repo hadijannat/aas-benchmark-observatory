@@ -1,98 +1,205 @@
 # AAS Benchmark Observatory
 
-Automated benchmarking of Asset Administration Shell (AAS) implementations — both in-process SDK pipelines and server APIs.
+Automated, validity-focused benchmarking for Asset Administration Shell (AAS) implementations across two tiers:
+- SDK in-process pipeline benchmarks
+- Server API conformance and performance benchmarks
 
 [![Nightly Benchmark](https://github.com/hadijannat/aas-benchmark-observatory/actions/workflows/nightly-benchmark.yml/badge.svg)](https://github.com/hadijannat/aas-benchmark-observatory/actions/workflows/nightly-benchmark.yml)
 
-## Architecture
+## What This Repository Does
 
-A **manifest-driven CI harness** that benchmarks AAS implementations across two tiers and publishes results to GitHub Pages.
+This repository standardizes AAS benchmarking so results remain comparable over time and across implementations.
 
+Key goals:
+- Measurement correctness: timing loops benchmark isolated state.
+- Reproducibility: adapter dependencies are pinned and CI is deterministic.
+- Longitudinal comparability: canonical operation IDs and backward-compatible aggregation.
+
+High-level pipeline:
+
+```text
+known-sdks.json
+  -> CI matrix (enabled SDK/server adapters)
+  -> adapter run-benchmarks.sh
+  -> per-adapter artifacts (report.json, conformance, k6)
+  -> scripts/aggregate.py
+  -> dashboard/data/results.json
+  -> GitHub Pages dashboard
 ```
-known-sdks.json → GitHub Actions matrix
-  ├─ SDK benchmarks:    language setup → generate datasets → run pipeline → report.json
-  └─ Server benchmarks: Docker Compose → seed data → conformance + k6 → results
-Both → aggregate.py → dashboard/data/results.json → GitHub Pages
+
+## Repository Map
+
+| Path | Purpose |
+|---|---|
+| `known-sdks.json` | Source-of-truth manifest for `sdk_benchmarks[]` and `server_benchmarks[]` |
+| `sdks/<id>/` | Per-SDK adapters and emitters producing `report.json` |
+| `servers/<id>/` | Per-server adapters (`sdk.yaml`, `docker-compose.yml`) |
+| `datasets/` | Deterministic AAS dataset generation (`wide`, `deep`, `mixed`, XML, validation targets, AASX) |
+| `harness/` | Shared scripts for conformance, health checks, data seeding, and k6 runs |
+| `scripts/` | CI helpers for matrix generation, aggregation, report validation, and discovery |
+| `.github/workflows/` | Nightly run, PR smoke, weekly discovery |
+| `dashboard/` | Static dashboard UI and `dashboard/data/results.json` consumer |
+| `docs/` | Benchmark validity governance/checklists/reports |
+
+## Benchmark Model
+
+### SDK Tier
+
+Canonical core operations:
+- `deserialize`
+- `validate`
+- `traverse`
+- `update`
+- `serialize`
+
+Capability operations:
+- `deserialize_xml`
+- `serialize_xml`
+- `aasx_extract`
+- `aasx_repackage`
+
+Standard datasets:
+- Core datasets: `wide`, `deep`, `mixed`
+- Validation targets: `val_cardinality`, `val_referential`, `val_regex`
+
+### Server Tier
+
+Server adapters run:
+- Conformance tests (`aas-test-engines`)
+- k6 scenarios / CRUD load tests
+
+## Requirements (Local)
+
+For full multi-SDK local benchmarking:
+- Python 3.11+ (`python3`, `pip`)
+- Go 1.22+
+- Node.js 20+ and npm
+- Java (Temurin/OpenJDK) + Maven
+- Rust toolchain (`cargo`, `rustc`)
+
+For server-tier local benchmarking:
+- Docker + Docker Compose
+- `yq`
+- `aas-test-engines`
+- `k6`
+
+## Quick Start (Single SDK)
+
+```bash
+git clone https://github.com/hadijannat/aas-benchmark-observatory.git
+cd aas-benchmark-observatory
+
+mkdir -p /tmp/aas-datasets /tmp/aas-results/python
+python3 datasets/generate.py --output-dir /tmp/aas-datasets
+python3 datasets/generate.py --output-dir /tmp/aas-datasets --xml
+python3 datasets/generate.py --output-dir /tmp/aas-datasets --validation-targets
+
+bash sdks/aas-core3-python/run-benchmarks.sh /tmp/aas-datasets /tmp/aas-results/python
+python3 scripts/validate_report.py /tmp/aas-results/python/report.json
 ```
 
-### Components
+## Full Local Multi-SDK Run
 
-| Component | Purpose |
-|-----------|---------|
-| `known-sdks.json` | Source of truth — two-tier schema with `sdk_benchmarks[]` and `server_benchmarks[]` |
-| `sdks/<id>/` | Per-SDK adapter: pipeline benchmarks using native language harnesses |
-| `servers/<id>/` | Per-server adapter: `sdk.yaml` contract + `docker-compose.yml` |
-| `datasets/` | Deterministic AAS v3.0 dataset generator (wide/deep/mixed) for SDK benchmarks |
-| `harness/` | Shared test harness: seed data, conformance tests, k6 load benchmarks |
-| `scripts/` | CI helpers: matrix generation (`sdk`/`server`), SDK discovery, result aggregation |
-| `.github/workflows/` | Monthly benchmarks, PR smoke tests, SDK version discovery |
-| `dashboard/` | Zero-dependency tabbed SPA deployed to GitHub Pages |
+The following mirrors CI-style SDK execution and aggregation:
 
-### Benchmark Tiers
+```bash
+TS="$(date +%Y%m%d-%H%M%S)"
+DATA="/tmp/aas-bench-datasets-$TS"
+OUT="/tmp/aas-bench-results-$TS"
+mkdir -p "$DATA" "$OUT"
 
-**Tier A — SDK Pipeline Benchmarks**: In-process benchmarks comparing AAS library performance across languages on a canonical Read → Validate → Traverse → Update → Write pipeline using generated datasets (wide, deep, mixed).
+python3 datasets/generate.py --output-dir "$DATA"
+python3 datasets/generate.py --output-dir "$DATA" --xml
+python3 datasets/generate.py --output-dir "$DATA" --validation-targets
 
-**Tier B — Server API Benchmarks**: Docker-based benchmarks testing AAS server conformance and HTTP API performance via k6.
+for sdk in aas-core3-python aas-core3-golang aas-core3-typescript aas-core3-java basyx-rust; do
+  mkdir -p "$OUT/$sdk"
+  bash "sdks/$sdk/run-benchmarks.sh" "$DATA" "$OUT/$sdk"
+  python3 scripts/validate_report.py "$OUT/$sdk/report.json"
+done
 
-### Workflow
+python3 scripts/aggregate.py \
+  --results-dir "$OUT" \
+  --output "$OUT/aggregated_results.json"
 
-1. **Nightly (daily @ 03:00 UTC)**: Runs full SDK pipeline + server API benchmarks for all enabled implementations
-2. **PR Smoke**: On pull requests touching `sdks/`, `servers/`, or `harness/`, runs quick smoke tests
-3. **Weekly Discovery**: Checks Docker Hub for new server versions, opens issues
+echo "DATASETS_DIR=$DATA"
+echo "RESULTS_DIR=$OUT"
+```
 
-## Adding a Server
+Notes:
+- `aas-core3-csharp` is currently disabled in `known-sdks.json`.
+- `basyx-rust` currently skips `mixed` if parser support is missing; run logs make this explicit.
 
-1. Add an entry to `known-sdks.json` under `server_benchmarks` with `"enabled": false`
-2. Create `servers/<id>/sdk.yaml` describing the API contract
-3. Create `servers/<id>/docker-compose.yml` to launch the server
-4. Open a PR — the smoke test validates your adapter
-5. After review, set `"enabled": true`
+## Output Contracts
 
-## Benchmark Validity Checklist
+SDK adapters must emit:
+- `<results>/<sdk_id>/report.json`
 
-Before enabling a new adapter, run through:
+Server adapters typically emit:
+- `<results>/<server_id>/conformance_summary.json`
+- `<results>/<server_id>/k6_summary_<server_id>.json`
+- `<results>/<server_id>/k6_crud_<server_id>.json`
+
+Aggregated output:
+- `scripts/aggregate.py` writes a merged JSON with `sdk_benchmarks[]` and `server_benchmarks[]`.
+
+Report schema (backward-compatible additions in use):
+- `operation_id`
+- `operation_track`
+- `sample_count`
+- `measurement_semantics`
+- `failure_state`
+
+## Validity Guardrails
+
+Enforced by adapter/report tooling:
+- Canonical operation normalization to snake_case IDs.
+- Adapter report validation via `scripts/validate_report.py`.
+- Hard-fail behavior for benchmark runner errors in CI.
+- Aggregation logic prefers independent `sample_count` over loop `iterations`.
+- Core-track eligibility is derived from full core dataset + operation coverage.
+
+Governance docs:
 - `docs/benchmark-validity-checklist.md`
-
-Related governance docs:
 - `docs/benchmark-validity-findings.md`
 - `docs/benchmark-remediation-backlog.md`
 - `docs/benchmark-validation-report.md`
 
-## Adding an SDK
+## CI Workflows
 
-1. Add an entry to `known-sdks.json` under `sdk_benchmarks` with `"enabled": false`
-2. Create `sdks/<id>/` with `run-benchmarks.sh` and language-specific benchmark files
-3. Ensure `run-benchmarks.sh <datasets_dir> <output_dir>` produces a valid `report.json`
-4. Open a PR — the smoke test validates your adapter
-5. After review, set `"enabled": true`
+- `nightly-benchmark.yml`
+  - Schedule: daily at `03:00 UTC`
+  - Also supports manual `workflow_dispatch` with optional `sdk_filter`
+- `pr-smoke.yml`
+  - Runs smoke checks for changed enabled adapters and shared harness changes
+- `sdk-discovery.yml`
+  - Schedule: weekly on Monday at `09:00 UTC`
+  - Opens issues for newly discovered server Docker image tags
 
-## Currently Tracked
+## Adding a New Adapter
 
-### SDK Libraries
+### SDK Adapter
+1. Add entry under `sdk_benchmarks[]` in `known-sdks.json` with `"enabled": false`.
+2. Create `sdks/<id>/run-benchmarks.sh` and adapter benchmark code.
+3. Ensure `run-benchmarks.sh <datasets_dir> <output_dir>` emits valid `report.json`.
+4. Run `python3 scripts/validate_report.py <report.json>`.
+5. Enable after PR validation.
 
-| SDK | Language | Harness | Package |
-|-----|----------|---------|---------|
-| aas-core3.0 Python | Python | pytest-benchmark | `aas-core3.0` |
-| aas-core3.0 Go | Go | testing.B | `github.com/aas-core-works/aas-core3.0-golang` |
-| aas-core3.0 Java | Java | JMH | `io.github.aas-core-works:aas-core3.0-java` |
-| aas-core3.0 TypeScript | TypeScript | tinybench | `@aas-core-works/aas-core3.0-typescript` |
-| BaSyx Rust SDK | Rust | criterion | `basyx-rs` |
-| aas-core3.0 C# | C# | BenchmarkDotNet | `AasCore.Aas3_0` (disabled) |
-
-### Server Implementations
-
-| Server | Docker Image |
-|--------|-------------|
-| Eclipse BaSyx Java v2 | `eclipsebasyx/aas-environment` |
-| FA³ST Service | `fraunhoferiosb/faaast-service` |
+### Server Adapter
+1. Add entry under `server_benchmarks[]` in `known-sdks.json` with `"enabled": false`.
+2. Create `servers/<id>/sdk.yaml` and `servers/<id>/docker-compose.yml`.
+3. Validate conformance/k6 flow locally or in PR smoke.
+4. Enable after PR validation.
 
 ## Dashboard
 
-View the latest results at: https://hadijannat.github.io/aas-benchmark-observatory/
+Latest dashboard:
+- [https://hadijannat.github.io/aas-benchmark-observatory/](https://hadijannat.github.io/aas-benchmark-observatory/)
 
-The dashboard is a tabbed SPA:
-- **SDK Pipeline**: Comparison tables per dataset with operation timings, plus per-SDK detail cards showing metadata
-- **Server API**: Conformance pass/fail cards and k6 performance results
+Main views:
+- SDK pipeline comparisons and per-operation timing tables
+- Core/capability track interpretation
+- Server conformance and k6 performance summaries
 
 ## License
 
