@@ -76,12 +76,16 @@ PY
   fi
 
   PROFILE_FAILURE_STATE="ok"
-  if [ "$CMD_STATUS" -ne 0 ]; then
-    PROFILE_FAILURE_STATE="execution_failed"
-    EXECUTION_FAILURES=$((EXECUTION_FAILURES + 1))
-  elif [ "$JSON_PARSE_OK" -ne 1 ]; then
+  if [ "$JSON_PARSE_OK" -ne 1 ]; then
     PROFILE_FAILURE_STATE="parse_failed"
     EXECUTION_FAILURES=$((EXECUTION_FAILURES + 1))
+  elif [ "$CMD_STATUS" -ne 0 ] && [ "$CHECKS_PASSED" -eq 0 ] && [ "$CHECKS_FAILED" -eq 0 ]; then
+    # Treat non-zero exit as execution failure only if we could not derive any check result.
+    # aas_test_engines may return non-zero for conformance findings while still emitting valid JSON.
+    PROFILE_FAILURE_STATE="execution_failed"
+    EXECUTION_FAILURES=$((EXECUTION_FAILURES + 1))
+  elif [ "$CHECKS_FAILED" -gt 0 ]; then
+    PROFILE_FAILURE_STATE="checks_failed"
   fi
 
   TOTAL_CHECKS_PASSED=$((TOTAL_CHECKS_PASSED + CHECKS_PASSED))
@@ -101,6 +105,8 @@ GRAND_TOTAL=$((TOTAL_CHECKS_PASSED + TOTAL_CHECKS_FAILED))
 SUMMARY_FAILURE_STATE="ok"
 if [ "$EXECUTION_FAILURES" -gt 0 ]; then
   SUMMARY_FAILURE_STATE="execution_failed"
+elif [ "$TOTAL_CHECKS_FAILED" -gt 0 ]; then
+  SUMMARY_FAILURE_STATE="checks_failed"
 fi
 
 printf '{"sdk_id":"%s","total_profiles":%d,"checks_passed":%d,"checks_failed":%d,"checks_total":%d,"execution_failures":%d,"failure_state":"%s","results":%s}\n' \

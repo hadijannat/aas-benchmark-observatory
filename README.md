@@ -167,8 +167,8 @@ Governance docs:
 
 ## CI Workflows
 
-- `nightly-benchmark.yml`
-  - Schedule: daily at `03:00 UTC`
+- `nightly-benchmark.yml` (monthly benchmark workflow)
+  - Schedule: monthly on day 1 at `03:00 UTC`
   - Also supports manual `workflow_dispatch` with optional `sdk_filter`
 - `pr-smoke.yml`
   - Runs smoke checks for changed enabled adapters and shared harness changes
